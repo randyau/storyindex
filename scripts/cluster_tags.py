@@ -9,8 +9,14 @@ This does not require re-running the extraction pass — it only consumes
 what's already in tag_candidates. Safe to re-run: already-clustered rows are
 skipped, and get_or_create_tag/link_story_tag are idempotent.
 
+Conventional location, matching the web UI and the other scripts/*.py
+defaults: the library lives at library/storyindex.sqlite. Override with
+--db if yours lives elsewhere.
+
 Usage:
-    python scripts/cluster_tags.py --db storyindex.sqlite \
+    python scripts/cluster_tags.py
+    # equivalent to:
+    python scripts/cluster_tags.py --db library/storyindex.sqlite \
         --embed-model nomic-embed-text --threshold 0.82
 """
 
@@ -22,15 +28,19 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from storyindex import db
 from storyindex.cluster import DEFAULT_EMBED_MODEL, DEFAULT_SIMILARITY_THRESHOLD, canonical_name, cluster_tag_texts
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--db", type=Path, default=REPO_ROOT / "library" / "storyindex.sqlite",
+        help="path to the library's SQLite file (default: library/storyindex.sqlite)",
+    )
     parser.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     parser.add_argument("--threshold", type=float, default=DEFAULT_SIMILARITY_THRESHOLD)
     args = parser.parse_args()

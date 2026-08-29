@@ -658,7 +658,11 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Local story index browse/review app")
-    parser.add_argument("--db", type=Path, default=Path("storyindex.sqlite"))
+    parser.add_argument(
+        "--db", type=Path, default=Path("library/storyindex.sqlite"),
+        help="path to this library's SQLite file (default: library/storyindex.sqlite, "
+             "created if missing - the same default the CLI scripts in scripts/ use)",
+    )
     parser.add_argument("--library-name", default=None, help="name to register this --db under (default: filename)")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)

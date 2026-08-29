@@ -41,18 +41,33 @@ uv sync --extra dev
 ## Quick start
 
 ```bash
-# 1. Get a folder of story files onto disk however you like (see
-#    docs/crawler-parser-contract.md for the wget-based crawl this was
-#    originally built around, if you're pulling from a live site).
+# 1. Get a folder of story files onto disk, conventionally under
+#    archive/<opaque-label>/ (see docs/crawler-parser-contract.md for the
+#    wget-based crawl this was originally built around, if you're pulling
+#    from a live site).
 
-# 2. Launch the web app.
-uv run python -m storyindex.app --db mylibrary.sqlite
+# 2. Launch the web app. With no --db, this reads/writes
+#    library/storyindex.sqlite (created on first run) — the same default
+#    path the scripts/*.py CLI tools use, so everything shares one library
+#    without you having to remember or pass a path around.
+uv run python -m storyindex.app
 
 # 3. Open http://localhost:8765/ and use the "sync a library from disk"
 #    form under /jobs to point it at your folder — no code required for a
 #    simple filename-as-title / regex-based import. Add prompts under
 #    /prompts and start an extraction pass under /jobs once Ollama is up.
+#
+#    Prefer the command line? scripts/sync_archive.py does the same sync
+#    without starting the web server:
+#      uv run python scripts/sync_archive.py \
+#        --adapter storyindex.adapters.generic_adapter:GenericAdapter \
+#        --archive-root archive/my-label
 ```
+
+`library/`, `archive/`, and `drop/` are all gitignored — nothing under them
+is meant to enter the repo. Pass `--db somewhere-else.sqlite` (web app) or
+`--db` (any `scripts/*.py` tool) to use a different location; every tool
+defaults to `library/storyindex.sqlite` if you don't.
 
 ## Running and connecting
 

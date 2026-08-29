@@ -34,6 +34,17 @@ def test_reconnect_is_idempotent(tmp_path):
     conn2.close()
 
 
+def test_connect_creates_missing_parent_directory(tmp_path):
+    # library/storyindex.sqlite is the default path for the web app and
+    # every scripts/*.py tool - a fresh clone won't have library/ yet, so
+    # connect() must create it rather than raising sqlite3.OperationalError.
+    path = tmp_path / "library" / "storyindex.sqlite"
+    assert not path.parent.exists()
+    conn = db.connect(path)
+    assert path.parent.is_dir()
+    conn.close()
+
+
 def test_stories_default_status_active(conn, make_sig):
     db.upsert_story(conn, make_sig("s1"))
     row = conn.execute("SELECT status FROM stories WHERE id='s1'").fetchone()

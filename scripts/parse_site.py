@@ -10,11 +10,24 @@ via --adapter, which typically stays out of version control (see
 .gitignore and docs/crawler-parser-contract.md) since it can encode
 enough structural detail to fingerprint the source site.
 
+Just want stories browsable/searchable, no tagging yet? Skip this script
+and drop/ entirely — scripts/sync_archive.py goes straight from an archive
+root to a queryable library/*.sqlite. Use *this* script instead when you
+want the drop/ JSON intermediate, e.g. to run scripts/extract_tags.py's
+CLI-driven tagging pass afterward.
+
+Conventional locations (also what the web UI and the other scripts/*.py
+default to, so everything reads/writes the same places without you having
+to remember paths): archive roots live under archive/<opaque-label>/,
+signatures land in drop/ (this script's --out defaults there), and the
+resulting SQLite library belongs in library/ once ingested. All three are
+gitignored — nothing under them is meant to enter the repo.
+
 Usage:
     python scripts/parse_site.py \\
         --adapter storyindex.adapters.example_adapter:ExampleAdapter \\
-        --archive-root archive/site-a --out drop/ \\
-        [--vocab-out drop/site_tags_vocab.json]
+        --archive-root archive/site-a \\
+        [--out drop/] [--vocab-out drop/site_tags_vocab.json]
 
 --adapter is `module.path:ClassName`, importable from src/ or elsewhere on
 sys.path, and constructed as AdapterClass(archive_root).
@@ -26,7 +39,7 @@ JSON file to configure it:
 
     python scripts/parse_site.py \\
         --adapter storyindex.adapters.generic_adapter:GenericAdapter \\
-        --archive-root my-download/ --out drop/ \\
+        --archive-root my-download/ \\
         --adapter-config my-adapter-config.json \\
         --glob "*.html,*.txt"
 
@@ -45,7 +58,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 
 def sha1(text: str) -> str:
@@ -85,8 +99,14 @@ def call_extract(adapter, text: str, relpath: str):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--adapter", required=True, help="module.path:ClassName")
-    parser.add_argument("--archive-root", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--archive-root", type=Path, required=True,
+        help="crawled site root, conventionally under archive/<opaque-label>/",
+    )
+    parser.add_argument(
+        "--out", type=Path, default=REPO_ROOT / "drop",
+        help="where to write StorySignature JSON files (default: drop/)",
+    )
     parser.add_argument(
         "--vocab-out", type=Path, default=None,
         help="optional: if the adapter defines tag_vocab(), write code->label JSON here",

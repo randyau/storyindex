@@ -18,6 +18,11 @@ signatures/
 *.sqlite
 *.sqlite3
 
+# Working library directory - a real, in-use SQLite library plus whatever
+# else you keep alongside it locally. Doubly covered by *.sqlite above,
+# but named explicitly since this is the intended place to put one.
+library/
+
 # Python
 __pycache__/
 *.pyc

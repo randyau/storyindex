@@ -4,8 +4,15 @@ from a drop folder, upserts them into SQLite, and runs the local-model
 extraction pass on any story that doesn't yet have candidates for the
 given prompt version.
 
+Conventional locations, matching the web UI and the other scripts/*.py
+defaults: signatures come from drop/ (as scripts/parse_site.py writes
+them), the library lives at library/storyindex.sqlite. Override either if
+yours live elsewhere.
+
 Usage:
-    python scripts/extract_tags.py --drop-dir drop/ --db storyindex.sqlite \
+    python scripts/extract_tags.py --model qwen2.5:14b-instruct
+    # equivalent to:
+    python scripts/extract_tags.py --drop-dir drop/ --db library/storyindex.sqlite \
         --model qwen2.5:14b-instruct --prompt-version v1
 """
 
@@ -17,7 +24,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from storyindex import db
 from storyindex.classify import ExtractionError, extract_tags, load_prompt_template
@@ -25,9 +33,15 @@ from storyindex.signature import iter_signatures
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--drop-dir", type=Path, required=True)
-    parser.add_argument("--db", type=Path, required=True)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--drop-dir", type=Path, default=REPO_ROOT / "drop",
+        help="folder of StorySignature JSON files (default: drop/)",
+    )
+    parser.add_argument(
+        "--db", type=Path, default=REPO_ROOT / "library" / "storyindex.sqlite",
+        help="path to the library's SQLite file (default: library/storyindex.sqlite)",
+    )
     parser.add_argument("--model", required=True)
     parser.add_argument("--prompt-version", default="v1")
     parser.add_argument(

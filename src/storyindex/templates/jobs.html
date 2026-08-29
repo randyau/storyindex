@@ -30,6 +30,14 @@
   <input type="submit" value="start">
 </form>
 
+<h3>sync a library from disk</h3>
+<p class="muted">re-walks an archive folder and upserts every story page — safe to re-run, reports new/changed stories.</p>
+<form method="post" action="{{ url_for('create_sync_job') }}">
+  <label>adapter: <input type="text" name="adapter" placeholder="storyindex.adapters.site_a:SiteAAdapter" style="width:24rem"></label>
+  <label>archive root: <input type="text" name="archive_root" placeholder="archive/site-a" style="width:14rem"></label>
+  <input type="submit" value="start">
+</form>
+
 <h3>history</h3>
 <table>
 <tr><th>id</th><th>type</th><th>status</th><th>progress</th><th>prompt</th><th>model</th><th>created</th></tr>

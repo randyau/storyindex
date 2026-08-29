@@ -2,7 +2,15 @@
 {% block title %}{{ story['title'] }} — storyindex{% endblock %}
 {% block content %}
 <h2>{{ story['title'] }}</h2>
-<p class="muted">by {{ story['author'] }}</p>
+<p class="muted">
+  by {{ story['author'] }}
+  {% if story['status'] == 'removed' %}
+  · <strong>removed from the library</strong> ({{ story['removed_at'] }})
+  <form method="post" action="{{ url_for('restore_story', story_id=story['id']) }}" style="display:inline"><button>restore</button></form>
+  {% else %}
+  · <form method="post" action="{{ url_for('remove_story', story_id=story['id']) }}" style="display:inline" onsubmit="return confirm('Remove this story from browse/search? Tags and history are kept.')"><button>remove</button></form>
+  {% endif %}
+</p>
 
 {% if parts|length > 1 %}
 <p class="muted">parts:

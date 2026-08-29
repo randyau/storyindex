@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}libraries — storyindex{% endblock %}
+{% block content %}
+<h2>libraries</h2>
+<p class="muted">a library is one sqlite file — one story collection. switching changes which one this app is browsing.</p>
+
+<table>
+<tr><th>name</th><th>path</th><th></th></tr>
+{% for name, path in data['libraries'].items() %}
+<tr>
+  <td>{{ name }}{% if name == data['active'] %} <strong>(active)</strong>{% endif %}</td>
+  <td class="muted">{{ path }}</td>
+  <td>
+    {% if name != data['active'] %}
+    <form method="post" action="{{ url_for('switch_library') }}" style="display:inline">
+      <input type="hidden" name="name" value="{{ name }}">
+      <input type="submit" value="switch">
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="3" class="muted">no libraries registered yet.</td></tr>
+{% endfor %}
+</table>
+
+<h3>register another library</h3>
+<p class="muted">point this at a different sqlite file (e.g. a separate collection you've pulled from another source).</p>
+<form method="post" action="{{ url_for('add_library') }}">
+  <label>name: <input type="text" name="name" style="width:12rem"></label>
+  <label>path: <input type="text" name="path" placeholder="/path/to/other.sqlite" style="width:20rem"></label>
+  <input type="submit" value="register">
+</form>
+{% endblock %}

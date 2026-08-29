@@ -16,10 +16,15 @@ from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
 
-from storyindex import db
+from storyindex import db, libraries
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
+app.config["LIBRARIES_PATH"] = libraries.DEFAULT_CONFIG_PATH
+
+
+def _libraries_path() -> Path:
+    return app.config["LIBRARIES_PATH"]
 
 SRC_DIR = Path(__file__).resolve().parent.parent
 
@@ -133,6 +138,22 @@ def story_detail(story_id: str):
         story=story, parts=parts, tags=tags, site_tags=site_tags, tag_names=tag_names,
         prompts=prompts,
     )
+
+
+@app.route("/story/<story_id>/remove", methods=["POST"])
+def remove_story(story_id: str):
+    conn = get_db()
+    db.set_story_status(conn, story_id, "removed")
+    conn.commit()
+    return redirect(url_for("index"))
+
+
+@app.route("/story/<story_id>/restore", methods=["POST"])
+def restore_story(story_id: str):
+    conn = get_db()
+    db.set_story_status(conn, story_id, "active")
+    conn.commit()
+    return redirect(url_for("story_detail", story_id=story_id))
 
 
 @app.route("/story/<story_id>/tags", methods=["POST"])
@@ -332,6 +353,53 @@ def create_cluster_job():
     return redirect(url_for("job_detail", job_id=job_id))
 
 
+@app.route("/jobs/sync", methods=["POST"])
+def create_sync_job():
+    import json
+
+    conn = get_db()
+    adapter = request.form.get("adapter", "").strip()
+    archive_root = request.form.get("archive_root", "").strip()
+    if not adapter or not archive_root:
+        return redirect(url_for("jobs_list"))
+    scope = json.dumps({"adapter": adapter, "archive_root": archive_root})
+    job_id = db.create_job(conn, "sync", _now(), scope=scope)
+    conn.commit()
+    _spawn_job(job_id)
+    return redirect(url_for("job_detail", job_id=job_id))
+
+
+@app.context_processor
+def _inject_library_name():
+    data = libraries.load(_libraries_path())
+    return {"current_library": data.get("active")}
+
+
+@app.route("/libraries")
+def libraries_list():
+    data = libraries.load(_libraries_path())
+    return render_template("libraries.html", data=data)
+
+
+@app.route("/libraries/add", methods=["POST"])
+def add_library():
+    name = request.form.get("name", "").strip()
+    path = request.form.get("path", "").strip()
+    if name and path:
+        libraries.register(name, path, _libraries_path())
+    return redirect(url_for("libraries_list"))
+
+
+@app.route("/libraries/switch", methods=["POST"])
+def switch_library():
+    name = request.form.get("name", "").strip()
+    data = libraries.load(_libraries_path())
+    if name in data["libraries"]:
+        libraries.set_active(name, _libraries_path())
+        app.config["DB_PATH"] = Path(data["libraries"][name])
+    return redirect(url_for("index"))
+
+
 @app.route("/tags")
 def tags_admin():
     conn = get_db()
@@ -365,11 +433,14 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Local story index browse/review app")
     parser.add_argument("--db", type=Path, default=Path("storyindex.sqlite"))
+    parser.add_argument("--library-name", default=None, help="name to register this --db under (default: filename)")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
     app.config["DB_PATH"] = args.db
+    name = args.library_name or args.db.stem
+    libraries.ensure_registered_and_active(name, str(args.db.resolve()), _libraries_path())
     app.run(host=args.host, port=args.port, debug=False)
 
 

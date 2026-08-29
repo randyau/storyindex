@@ -31,6 +31,7 @@
   <a href="{{ url_for('tags_admin') }}">manage tags</a>
   <a href="{{ url_for('jobs_list') }}">jobs</a>
   <a href="{{ url_for('prompts_list') }}">prompts</a>
+  <a href="{{ url_for('libraries_list') }}" style="float:right">library: {{ current_library or '(none)' }}</a>
 </nav>
 {% block content %}{% endblock %}
 </body>

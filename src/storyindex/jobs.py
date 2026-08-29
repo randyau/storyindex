@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import importlib
+import json
 import os
 import sqlite3
 from collections import Counter, defaultdict
@@ -154,9 +157,94 @@ def run_cluster_job(db_path: Path, job_id: int) -> None:
         conn.close()
 
 
+def _sha1(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _load_adapter_class(spec: str):
+    module_name, _, class_name = spec.partition(":")
+    if not class_name:
+        raise ValueError(f"adapter spec must be 'module.path:ClassName', got: {spec!r}")
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
+
+
+SYNC_COMMIT_EVERY = 200
+
+
+def run_sync_job(db_path: Path, job_id: int) -> None:
+    """Re-walk an archive root with a SiteAdapter and upsert every story
+    page straight into the DB — idempotent via StorySignature.id/
+    content_hash, so re-running reports new/changed/unchanged for free.
+    Wraps the same adapter contract scripts/parse_site.py uses, as a
+    monitorable job instead of a separate offline step."""
+    conn = db.connect(db_path)
+    try:
+        job = db.get_job(conn, job_id)
+        if job is None:
+            raise ValueError(f"no such job: {job_id}")
+
+        params = json.loads(job["scope"] or "{}")
+        adapter_spec = params.get("adapter")
+        archive_root = Path(params["archive_root"]) if params.get("archive_root") else None
+        if not adapter_spec or not archive_root:
+            db.mark_job_failed(conn, job_id, _now(), "sync job missing adapter/archive_root")
+            conn.commit()
+            return
+
+        adapter_class = _load_adapter_class(adapter_spec)
+        adapter = adapter_class(archive_root)
+
+        paths = []
+        for p in archive_root.rglob("*.html"):
+            relpath = p.relative_to(archive_root).as_posix()
+            if adapter.matches(relpath) and adapter.is_story_page(relpath):
+                paths.append(p)
+
+        db.set_job_total(conn, job_id, len(paths))
+        db.mark_job_running(conn, job_id, _now(), os.getpid())
+        conn.commit()
+
+        since_commit = 0
+        for path in paths:
+            relpath = path.relative_to(archive_root).as_posix()
+            try:
+                html_text = path.read_text(encoding="utf-8", errors="replace")
+                fields = adapter.extract(html_text)
+                group_key = adapter.group_key(relpath)
+                part_idx = adapter.part_index(relpath)
+                sig = StorySignature(
+                    id=_sha1(relpath), group_id=_sha1(group_key), part_index=part_idx,
+                    title=fields.title, author=fields.author, body_text=fields.body_text,
+                    source_relpath=relpath, content_hash=_sha1(fields.body_text),
+                    ingested_at=_now(), tags=tuple(getattr(fields, "tags", ())),
+                )
+                db.upsert_story(conn, sig)
+            except Exception:
+                db.increment_job_progress(conn, job_id, failed=1)
+            else:
+                db.increment_job_progress(conn, job_id, done=1)
+            since_commit += 1
+            if since_commit >= SYNC_COMMIT_EVERY:
+                conn.commit()
+                since_commit = 0
+
+        conn.commit()
+        db.mark_job_done(conn, job_id, _now())
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        conn.rollback()
+        db.mark_job_failed(conn, job_id, _now(), str(exc))
+        conn.commit()
+        raise
+    finally:
+        conn.close()
+
+
 RUNNERS = {
     "extract": run_extract_job,
     "cluster": run_cluster_job,
+    "sync": run_sync_job,
 }
 
 

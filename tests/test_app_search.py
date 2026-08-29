@@ -33,3 +33,25 @@ def test_index_search_no_results(tmp_path, make_sig):
     r = client.get("/?q=zzzznomatch")
     assert r.status_code == 200
     assert "no stories" in r.get_data(as_text=True)
+
+
+def test_index_filters_by_include_and_exclude_tags(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1", title="Wits Only"))
+    db.upsert_story(conn, make_sig("s2", title="Wits And Holmes"))
+    db.add_story_tag_by_name(conn, "s1", "battle of wits", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s2", "battle of wits", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s2", "sherlock holmes", "2026-01-01T00:00:00Z")
+    conn.commit()
+    wits_id = db.get_or_create_tag(conn, "battle of wits", "2026-01-01T00:00:00Z")
+    holmes_id = db.get_or_create_tag(conn, "sherlock holmes", "2026-01-01T00:00:00Z")
+    conn.close()
+
+    client = _client(dbpath)
+    r = client.get(f"/?tags={wits_id}&exclude_tags={holmes_id}")
+    body = r.get_data(as_text=True)
+    assert "Wits Only" in body
+    assert "Wits And Holmes" not in body
+    assert "not sherlock holmes" in body
+    assert "battle of wits" in body

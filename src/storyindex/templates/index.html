@@ -4,6 +4,8 @@
 {% block content %}
 <form method="get" action="{{ url_for('index') }}">
   <input type="text" name="q" placeholder="search title or author..." value="{{ q }}">
+  <input type="hidden" name="tags" value="{{ tags_param }}">
+  <input type="hidden" name="exclude_tags" value="{{ exclude_tags_param }}">
   <input type="submit" value="search">
 </form>
 
@@ -11,19 +13,27 @@
 <p class="muted"><a href="{{ url_for('review_queue') }}">{{ pending_review }} stor{{ 'y' if pending_review == 1 else 'ies' }} with tags awaiting review</a></p>
 {% endif %}
 
-{% if not q and not stories and page == 1 %}
+{% if not q and not stories and page == 1 and not include_chips and not exclude_chips %}
 <p>This library is empty. <a href="{{ url_for('jobs_list') }}">Sync a folder of stories from disk</a> (no
 coding required — a "no adapter needed" mode is available), or
 <a href="{{ url_for('new_story') }}">add one story by hand</a> to get started.</p>
 {% endif %}
 
+{% if include_chips or exclude_chips %}
+<p class="muted">filtering by:
+{% for c in include_chips %}<span class="tag-pill">{{ c['label'] }} <a href="{{ c['remove_href'] }}" title="remove filter">✕</a></span>{% endfor %}
+{% for c in exclude_chips %}<span class="tag-pill">not {{ c['label'] }} <a href="{{ c['remove_href'] }}" title="remove filter">✕</a></span>{% endfor %}
+</p>
+{% endif %}
+
 <h2>tags</h2>
+<p class="muted">click a tag to require it, or "exclude" to rule it out — e.g. "battle of wits" + exclude "sherlock holmes".</p>
 <p>
 {% for tag in tags %}
   {% if tag['kind'] == 'site' %}
   {{ m.tag_pill_link(url_for('site_tag_detail', code=tag['code']), tag['label'], tag['count']) }}
   {% else %}
-  {{ m.tag_pill_link(url_for('tag_detail', tag_id=tag['id']), tag['label'], tag['count']) }}
+  <span class="tag-pill"><a href="{{ tag['include_href'] }}">{{ tag['label'] }}</a> ({{ tag['count'] }}) <a href="{{ tag['exclude_href'] }}" class="muted" title="exclude this tag">exclude</a></span>
   {% endif %}
 {% else %}
   <span class="muted">no tags yet — run the extraction + clustering passes first.</span>
@@ -33,5 +43,5 @@ coding required — a "no adapter needed" mode is available), or
 <h2>{% if q %}results for "{{ q }}"{% else %}stories{% endif %}</h2>
 {{ m.story_list(stories, show_snippet=q) }}
 
-{{ m.pager(page, has_next, 'index', {'q': q}) }}
+{{ m.pager(page, has_next, 'index', {'q': q or none, 'tags': tags_param or none, 'exclude_tags': exclude_tags_param or none}) }}
 {% endblock %}

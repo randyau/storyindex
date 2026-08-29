@@ -90,23 +90,67 @@ PROMPTS_PAGE_SIZE = 20
 JOBS_PAGE_SIZE = 25
 
 
+def _parse_tag_ids(raw: str) -> list[int]:
+    ids = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    return ids
+
+
+def _filter_url(q: str, include_ids: list[int], exclude_ids: list[int]) -> str:
+    return url_for(
+        "index", q=q or None,
+        tags=",".join(str(i) for i in include_ids) or None,
+        exclude_tags=",".join(str(i) for i in exclude_ids) or None,
+    )
+
+
 @app.route("/")
 def index():
     conn = get_db()
     q = request.args.get("q", "").strip()
+    include_ids = _parse_tag_ids(request.args.get("tags", ""))
+    exclude_ids = _parse_tag_ids(request.args.get("exclude_tags", ""))
     page = max(request.args.get("page", 1, type=int), 1)
     offset = (page - 1) * PAGE_SIZE
-    stories = (
-        db.search_stories_fts(conn, q, limit=PAGE_SIZE, offset=offset)
-        if q
-        else db.list_stories(conn, limit=PAGE_SIZE, offset=offset)
+    stories = db.search_stories(
+        conn, q, include_tag_ids=include_ids, exclude_tag_ids=exclude_ids,
+        limit=PAGE_SIZE, offset=offset,
     )
     tags = _combined_tag_cloud(conn)
+
+    include_chips = []
+    exclude_chips = []
+    cloud = []
+    for t in tags:
+        if t["kind"] != "tag":
+            cloud.append({**t, "include_href": None, "exclude_href": None})
+            continue
+        if t["id"] in include_ids:
+            other = [i for i in include_ids if i != t["id"]]
+            include_chips.append({"label": t["label"], "remove_href": _filter_url(q, other, exclude_ids)})
+            continue
+        if t["id"] in exclude_ids:
+            other = [i for i in exclude_ids if i != t["id"]]
+            exclude_chips.append({"label": t["label"], "remove_href": _filter_url(q, include_ids, other)})
+            continue
+        cloud.append({
+            **t,
+            "include_href": _filter_url(q, include_ids + [t["id"]], exclude_ids),
+            "exclude_href": _filter_url(q, include_ids, exclude_ids + [t["id"]]),
+        })
+
     pending_review = db.count_pending_review(conn)
     return render_template(
         "index.html",
         stories=stories,
-        tags=tags,
+        tags=cloud,
+        include_chips=include_chips,
+        exclude_chips=exclude_chips,
+        tags_param=",".join(str(i) for i in include_ids),
+        exclude_tags_param=",".join(str(i) for i in exclude_ids),
         q=q,
         page=page,
         has_next=len(stories) == PAGE_SIZE,

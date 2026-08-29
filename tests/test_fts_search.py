@@ -54,3 +54,48 @@ def test_search_stories_fts_excludes_removed(conn, make_sig):
     db.set_story_status(conn, "s1", "removed")
     conn.commit()
     assert db.search_stories_fts(conn, "dragon") == []
+
+
+def test_search_stories_intersects_include_tags(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1", title="A"))
+    db.upsert_story(conn, make_sig("s2", title="B"))
+    db.add_story_tag_by_name(conn, "s1", "battle of wits", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s1", "sherlock holmes", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s2", "battle of wits", "2026-01-01T00:00:00Z")
+    conn.commit()
+
+    wits_id = db.get_or_create_tag(conn, "battle of wits", "2026-01-01T00:00:00Z")
+    holmes_id = db.get_or_create_tag(conn, "sherlock holmes", "2026-01-01T00:00:00Z")
+
+    results = db.search_stories(conn, include_tag_ids=[wits_id])
+    assert {r["id"] for r in results} == {"s1", "s2"}
+
+    results = db.search_stories(conn, include_tag_ids=[wits_id, holmes_id])
+    assert {r["id"] for r in results} == {"s1"}
+
+
+def test_search_stories_excludes_tags(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1", title="A"))
+    db.upsert_story(conn, make_sig("s2", title="B"))
+    db.add_story_tag_by_name(conn, "s1", "battle of wits", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s1", "sherlock holmes", "2026-01-01T00:00:00Z")
+    db.add_story_tag_by_name(conn, "s2", "battle of wits", "2026-01-01T00:00:00Z")
+    conn.commit()
+
+    wits_id = db.get_or_create_tag(conn, "battle of wits", "2026-01-01T00:00:00Z")
+    holmes_id = db.get_or_create_tag(conn, "sherlock holmes", "2026-01-01T00:00:00Z")
+
+    results = db.search_stories(conn, include_tag_ids=[wits_id], exclude_tag_ids=[holmes_id])
+    assert {r["id"] for r in results} == {"s2"}
+
+
+def test_search_stories_combines_keyword_and_tags(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1", title="A", body="A dragon guards gold."))
+    db.upsert_story(conn, make_sig("s2", title="B", body="A dragon flies away."))
+    db.add_story_tag_by_name(conn, "s1", "hoarding", "2026-01-01T00:00:00Z")
+    conn.commit()
+
+    hoarding_id = db.get_or_create_tag(conn, "hoarding", "2026-01-01T00:00:00Z")
+    results = db.search_stories(conn, query="dragon", include_tag_ids=[hoarding_id])
+    assert {r["id"] for r in results} == {"s1"}
+    assert "dragon" in results[0]["snippet"].lower()

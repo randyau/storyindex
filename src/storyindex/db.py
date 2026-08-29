@@ -801,6 +801,67 @@ def search_stories_fts(
     return results
 
 
+def search_stories(
+    conn: sqlite3.Connection,
+    query: str = "",
+    include_tag_ids: list[int] | None = None,
+    exclude_tag_ids: list[int] | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Browse/search combining an optional keyword search with tag
+    intersection (must have every include tag) and exclusion (must have
+    none of the exclude tags) - e.g. "battle of wits" AND NOT "sherlock
+    holmes". Superset of search_stories_fts/list_stories; those stay as
+    simpler standalone helpers since they're independently useful/tested."""
+    include_tag_ids = include_tag_ids or []
+    exclude_tag_ids = exclude_tag_ids or []
+    params: list = []
+
+    if query.strip():
+        terms = query.split()
+        match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
+        sql = """
+            SELECT s.id, s.group_id, s.part_index, s.title, s.author,
+                   snippet(stories_fts, 2, '\x01', '\x02', '…', 12) AS snippet
+            FROM stories_fts
+            JOIN stories s ON s.rowid = stories_fts.rowid
+            WHERE stories_fts MATCH ? AND s.status = 'active'
+        """
+        params.append(match_expr)
+        order_by = "ORDER BY rank"
+    else:
+        sql = "SELECT s.id, s.group_id, s.part_index, s.title, s.author, NULL AS snippet FROM stories s WHERE s.status = 'active'"
+        order_by = "ORDER BY s.title ASC"
+
+    for tag_id in include_tag_ids:
+        sql += " AND s.id IN (SELECT story_id FROM story_tags WHERE tag_id = ?)"
+        params.append(tag_id)
+    if exclude_tag_ids:
+        placeholders = ",".join("?" for _ in exclude_tag_ids)
+        sql += f" AND s.id NOT IN (SELECT story_id FROM story_tags WHERE tag_id IN ({placeholders}))"
+        params.extend(exclude_tag_ids)
+
+    sql += f" {order_by} LIMIT ? OFFSET ?"
+    params += [limit, offset]
+
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.row_factory = None
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d["snippet"]:
+            escaped = html.escape(d["snippet"])
+            d["snippet"] = escaped.replace("\x01", "<mark>").replace("\x02", "</mark>")
+        results.append(d)
+    return results
+
+
 def set_story_status(conn: sqlite3.Connection, story_id: str, status: str) -> None:
     removed_at = _now_iso() if status == "removed" else None
     conn.execute(

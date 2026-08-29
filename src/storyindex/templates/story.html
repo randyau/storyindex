@@ -76,4 +76,13 @@
 {% endif %}
 
 <div class="story-body">{{ story['body_text'] }}</div>
+
+{% if more_by_author %}
+<h3>more by {{ story['author'] }}</h3>
+<ul class="story-list">
+{% for s in more_by_author %}
+  <li><a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a></li>
+{% endfor %}
+</ul>
+{% endif %}
 {% endblock %}

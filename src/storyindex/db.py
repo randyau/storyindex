@@ -737,6 +737,26 @@ def _now_iso() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
+def stories_by_author(
+    conn: sqlite3.Connection, author: str, exclude_group_id: str, limit: int = 10
+) -> list[sqlite3.Row]:
+    """Other works by the same author, one row per story group (not per
+    chapter) - the "more like this" a reader most reliably wants."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT id, group_id, title, author
+        FROM stories
+        WHERE author = ? AND group_id != ? AND part_index = 0 AND status = 'active'
+        ORDER BY title ASC
+        LIMIT ?
+        """,
+        (author, exclude_group_id, limit),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
 def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> None:
     conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
 

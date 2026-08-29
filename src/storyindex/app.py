@@ -133,10 +133,11 @@ def story_detail(story_id: str):
     site_tags = db.site_tags_for_story(conn, story_id)
     tag_names = db.list_tag_names(conn)
     prompts = db.list_prompts(conn)
+    more_by_author = db.stories_by_author(conn, story["author"], story["group_id"])
     return render_template(
         "story.html",
         story=story, parts=parts, tags=tags, site_tags=site_tags, tag_names=tag_names,
-        prompts=prompts,
+        prompts=prompts, more_by_author=more_by_author,
     )
 
 

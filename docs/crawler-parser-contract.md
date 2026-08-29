@@ -147,6 +147,27 @@ python scripts/parse_site.py \
   --vocab-out drop/site_tags_vocab.json
 ```
 
+Don't want to write a class at all? `src/storyindex/adapters/generic_adapter.py`
+is a configurable, zero-code fallback: filename-as-title (falls back
+automatically when no regex matches or none is given), optional regexes for
+title/author/tags searched near the top of the file, a static tag list for
+batch-tagging everything in one run, and an optional naive HTML-tag-strip for
+messy markup. One file = one story (no chaptering). Configure it with JSON:
+
+```bash
+python scripts/parse_site.py \
+  --adapter storyindex.adapters.generic_adapter:GenericAdapter \
+  --archive-root my-download/ --out drop/ \
+  --adapter-config my-adapter-config.json \
+  --glob "*.html,*.txt"
+```
+
+`--glob` takes a comma-separated list (default `*.html`) so plain-text
+archives don't need to pretend to be HTML. See the module docstring in
+generic_adapter.py for the full config schema. Reach for a real `SiteAdapter`
+once the archive has structure this can't express — multi-part chapters, a
+per-story index page, non-trivial grouping.
+
 ## 3. StorySignature (the contract)
 
 One JSON file per story-part, filename `{id}.json`, written to the drop folder that

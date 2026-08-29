@@ -28,8 +28,11 @@ class SiteAdapter(Protocol):
     def part_index(self, relpath: str) -> int:
         """Order within the group. 0 for standalone / first part."""
 
-    def extract(self, html: str) -> ExtractedFields:
-        """Plain-text fields for one story part. No HTML/nav/boilerplate."""
+    def extract(self, html: str, relpath: str = "") -> ExtractedFields:
+        """Plain-text fields for one story part. No HTML/nav/boilerplate.
+        `relpath` is optional (the driver passes it if your extract() takes
+        a second parameter) — useful for filename-derived fallbacks like
+        generic_adapter.py's title-from-filename behavior."""
 
 
 _DEFAULT_BLOCK_TAGS = frozenset(

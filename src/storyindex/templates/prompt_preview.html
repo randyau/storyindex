@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}preview: {{ prompt['name'] }} — storyindex{% endblock %}
+{% block content %}
+<h2>preview — {{ prompt['name'] }}</h2>
+<p class="muted">model: {{ model }}{% if target_story %} · targeted at "{{ target_story['title'] }}"{% endif %}</p>
+<p class="muted">nothing here is saved — run this as a real job from the <a href="{{ url_for('jobs_list') }}">jobs</a> page once you like the results.</p>
+
+{% for r in results %}
+<div class="review-item">
+  <h4><a href="{{ url_for('story_detail', story_id=r['story']['id']) }}">{{ r['story']['title'] }}</a> <span class="muted">by {{ r['story']['author'] }}</span></h4>
+  {% if r['error'] %}
+  <p style="color:#a00">error: {{ r['error'] }}</p>
+  {% else %}
+  <p>
+  {% for t in r['tags'] %}<span class="tag-pill">{{ t }}</span>{% endfor %}
+  </p>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted">no stories to preview against yet.</p>
+{% endfor %}
+
+<p><a href="{{ url_for('prompts_list') }}">← back to prompts</a></p>
+{% endblock %}

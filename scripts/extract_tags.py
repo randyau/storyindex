@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from storyindex import db
-from storyindex.classify import ExtractionError, extract_tags
+from storyindex.classify import ExtractionError, extract_tags, load_prompt_template
 from storyindex.signature import iter_signatures
 
 
@@ -42,6 +42,7 @@ def main() -> None:
     args = parser.parse_args()
 
     conn = db.connect(args.db)
+    prompt_text = load_prompt_template(args.prompt_version)
 
     if args.site_tags_vocab is not None:
         vocab = json.loads(args.site_tags_vocab.read_text(encoding="utf-8"))
@@ -64,7 +65,7 @@ def main() -> None:
             continue
 
         try:
-            tags = extract_tags(sig, model=args.model, prompt_version=args.prompt_version)
+            tags = extract_tags(sig, model=args.model, prompt_text=prompt_text)
         except ExtractionError as exc:
             print(f"FAILED  {sig.id}: {exc}")
             failed += 1

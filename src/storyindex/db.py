@@ -220,13 +220,14 @@ def insert_candidates(
     prompt_version: str,
     model: str,
     created_at: str,
+    job_id: int | None = None,
 ) -> None:
     conn.executemany(
         """
-        INSERT INTO tag_candidates (story_id, tag_text, prompt_version, model, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO tag_candidates (story_id, tag_text, prompt_version, model, created_at, job_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        [(story_id, tag, prompt_version, model, created_at) for tag in tags],
+        [(story_id, tag, prompt_version, model, created_at, job_id) for tag in tags],
     )
 
 
@@ -260,14 +261,15 @@ def link_story_tag(
     tag_id: int,
     source: str,
     confidence: float | None = None,
+    job_id: int | None = None,
 ) -> None:
     conn.execute(
         """
-        INSERT INTO story_tags (story_id, tag_id, confidence, source)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO story_tags (story_id, tag_id, confidence, source, job_id)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(story_id, tag_id) DO NOTHING
         """,
-        (story_id, tag_id, confidence, source),
+        (story_id, tag_id, confidence, source, job_id),
     )
 
 
@@ -359,6 +361,135 @@ def stories_for_site_tag(conn: sqlite3.Connection, code: str) -> list[sqlite3.Ro
         ORDER BY s.title ASC, s.part_index ASC
         """,
         (code,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+# --- prompt library --------------------------------------------------------
+
+def create_prompt(
+    conn: sqlite3.Connection,
+    name: str,
+    text: str,
+    created_at: str,
+    based_on_id: int | None = None,
+) -> int:
+    """Every save is a new row, never an in-place edit, so a job that ran
+    against this prompt stays reproducible even after later tweaks."""
+    cur = conn.execute(
+        "INSERT INTO prompts (name, text, based_on_id, created_at) VALUES (?, ?, ?, ?)",
+        (name, text, based_on_id, created_at),
+    )
+    return cur.lastrowid
+
+
+def get_prompt(conn: sqlite3.Connection, prompt_id: int) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM prompts WHERE id = ?", (prompt_id,)).fetchone()
+    conn.row_factory = None
+    return row
+
+
+def list_prompts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM prompts ORDER BY created_at DESC").fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def random_stories(conn: sqlite3.Connection, n: int) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM stories WHERE status = 'active' ORDER BY RANDOM() LIMIT ?", (n,)
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def ensure_seed_prompt(conn: sqlite3.Connection, name: str, text: str, created_at: str) -> int:
+    """First-run bootstrap: if the prompt library is empty, seed it from a
+    given default (e.g. prompts/extract_v1.md) so there's something to run
+    a job against before the user has saved one of their own. No-op past
+    the first call."""
+    row = conn.execute("SELECT id FROM prompts LIMIT 1").fetchone()
+    if row is not None:
+        return row[0]
+    return create_prompt(conn, name, text, created_at)
+
+
+# --- tagging jobs ------------------------------------------------------
+
+def create_job(
+    conn: sqlite3.Connection,
+    type: str,
+    created_at: str,
+    prompt_id: int | None = None,
+    model: str | None = None,
+    scope: str | None = None,
+    total: int = 0,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO jobs (type, status, prompt_id, model, scope, total, created_at)
+        VALUES (?, 'queued', ?, ?, ?, ?, ?)
+        """,
+        (type, prompt_id, model, scope, total, created_at),
+    )
+    return cur.lastrowid
+
+
+def mark_job_running(conn: sqlite3.Connection, job_id: int, started_at: str, pid: int) -> None:
+    conn.execute(
+        "UPDATE jobs SET status = 'running', started_at = ?, pid = ? WHERE id = ?",
+        (started_at, pid, job_id),
+    )
+
+
+def set_job_total(conn: sqlite3.Connection, job_id: int, total: int) -> None:
+    conn.execute("UPDATE jobs SET total = ? WHERE id = ?", (total, job_id))
+
+
+def increment_job_progress(conn: sqlite3.Connection, job_id: int, done: int = 0, failed: int = 0) -> None:
+    conn.execute(
+        "UPDATE jobs SET done = done + ?, failed = failed + ? WHERE id = ?",
+        (done, failed, job_id),
+    )
+
+
+def mark_job_done(conn: sqlite3.Connection, job_id: int, finished_at: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET status = 'done', finished_at = ? WHERE id = ?",
+        (finished_at, job_id),
+    )
+
+
+def mark_job_failed(conn: sqlite3.Connection, job_id: int, finished_at: str, error: str) -> None:
+    conn.execute(
+        "UPDATE jobs SET status = 'failed', finished_at = ?, error = ? WHERE id = ?",
+        (finished_at, error, job_id),
+    )
+
+
+def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT j.*, p.name AS prompt_name FROM jobs j LEFT JOIN prompts p ON p.id = j.prompt_id WHERE j.id = ?",
+        (job_id,),
+    ).fetchone()
+    conn.row_factory = None
+    return row
+
+
+def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT j.*, p.name AS prompt_name FROM jobs j
+        LEFT JOIN prompts p ON p.id = j.prompt_id
+        ORDER BY j.created_at DESC LIMIT ?
+        """,
+        (limit,),
     ).fetchall()
     conn.row_factory = None
     return rows

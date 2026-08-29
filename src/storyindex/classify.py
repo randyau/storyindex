@@ -60,13 +60,17 @@ def _normalize_tags(raw_tags: list) -> list[str]:
 def extract_tags(
     sig: StorySignature,
     model: str,
-    prompt_version: str = "v1",
+    prompt_text: str,
 ) -> list[str]:
-    """Run the extraction pass for one story. Returns a deduped, cleaned
-    list of candidate tag strings. Raises ExtractionError on any failure —
-    caller decides whether to skip and continue or abort the batch."""
-    template = load_prompt_template(prompt_version)
-    prompt = build_prompt(template, sig)
+    """Run the extraction pass for one story against a given prompt
+    template's text. Returns a deduped, cleaned list of candidate tag
+    strings. Raises ExtractionError on any failure — caller decides
+    whether to skip and continue or abort the batch.
+
+    prompt_text is the caller's responsibility to source (the prompt
+    library in the DB, or load_prompt_template() for the legacy
+    file-based versions) — this function has no opinion on storage."""
+    prompt = build_prompt(prompt_text, sig)
 
     try:
         result = generate_json(prompt, model=model)

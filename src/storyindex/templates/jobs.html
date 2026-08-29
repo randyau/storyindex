@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}jobs — storyindex{% endblock %}
+{% block content %}
+<h2>jobs</h2>
+
+<h3>start an extraction pass</h3>
+<form method="post" action="{{ url_for('create_extract_job') }}">
+  <label>prompt:
+    <select name="prompt_id">
+      {% for p in prompts %}
+      <option value="{{ p['id'] }}">{{ p['name'] }} (#{{ p['id'] }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>model: <input type="text" name="model" value="qwen2.5:14b-instruct" style="width:14rem"></label>
+  <label>scope:
+    <select name="scope">
+      <option value="all">all stories</option>
+      <option value="untagged">untagged stories only</option>
+    </select>
+  </label>
+  <input type="submit" value="start">
+</form>
+{% if not prompts %}<p class="muted">no prompts saved yet — visit <a href="{{ url_for('prompts_list') }}">prompts</a> to write one.</p>{% endif %}
+
+<h3>start a clustering pass</h3>
+<p class="muted">folds any pending tag_candidates into the canonical tag vocabulary.</p>
+<form method="post" action="{{ url_for('create_cluster_job') }}">
+  <label>embedding model: <input type="text" name="model" value="nomic-embed-text" style="width:14rem"></label>
+  <input type="submit" value="start">
+</form>
+
+<h3>history</h3>
+<table>
+<tr><th>id</th><th>type</th><th>status</th><th>progress</th><th>prompt</th><th>model</th><th>created</th></tr>
+{% for j in jobs %}
+<tr>
+  <td><a href="{{ url_for('job_detail', job_id=j['id']) }}">{{ j['id'] }}</a></td>
+  <td>{{ j['type'] }}</td>
+  <td>{{ j['status'] }}</td>
+  <td>{{ j['done'] }}/{{ j['total'] }}{% if j['failed'] %} ({{ j['failed'] }} failed){% endif %}</td>
+  <td>{{ j['prompt_name'] or '' }}</td>
+  <td>{{ j['model'] or '' }}</td>
+  <td class="muted">{{ j['created_at'] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7" class="muted">no jobs yet.</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

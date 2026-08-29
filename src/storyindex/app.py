@@ -8,7 +8,10 @@ DB — no network calls, no model calls, nothing leaves the machine.
 from __future__ import annotations
 
 import datetime
+import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
@@ -17,6 +20,22 @@ from storyindex import db
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
+
+SRC_DIR = Path(__file__).resolve().parent.parent
+
+
+def _spawn_job(job_id: int) -> None:
+    """Launch the job runner as a detached subprocess so the request that
+    created the job returns immediately — the app stays usable (browse,
+    read, review other stories) while the job runs in the background."""
+    env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
+    subprocess.Popen(
+        [sys.executable, "-m", "storyindex.jobs", "--job-id", str(job_id), "--db", str(app.config["DB_PATH"])],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def get_db() -> sqlite3.Connection:
@@ -108,9 +127,11 @@ def story_detail(story_id: str):
     tags = db.tags_for_story(conn, story_id)
     site_tags = db.site_tags_for_story(conn, story_id)
     tag_names = db.list_tag_names(conn)
+    prompts = db.list_prompts(conn)
     return render_template(
         "story.html",
         story=story, parts=parts, tags=tags, site_tags=site_tags, tag_names=tag_names,
+        prompts=prompts,
     )
 
 
@@ -168,6 +189,137 @@ def review_queue():
         items=items, page=page, total=total,
         has_next=offset + len(items) < total,
     )
+
+
+@app.route("/prompts")
+def prompts_list():
+    conn = get_db()
+    if not db.list_prompts(conn):
+        _seed_default_prompt(conn)
+        conn.commit()
+    prompts = db.list_prompts(conn)
+    return render_template("prompts.html", prompts=prompts)
+
+
+@app.route("/prompts/new", methods=["POST"])
+def create_prompt():
+    conn = get_db()
+    name = request.form.get("name", "").strip()
+    text = request.form.get("text", "").strip()
+    based_on_id = request.form.get("based_on_id", type=int)
+    if name and text:
+        db.create_prompt(conn, name, text, _now(), based_on_id=based_on_id)
+        conn.commit()
+    return redirect(url_for("prompts_list"))
+
+
+def _run_prompt_preview(prompt: sqlite3.Row, model: str, stories: list[sqlite3.Row]) -> list[dict]:
+    from storyindex.classify import ExtractionError, extract_tags
+    from storyindex.jobs import row_to_sig
+
+    results = []
+    for row in stories:
+        sig = row_to_sig(row)
+        try:
+            tags = extract_tags(sig, model=model, prompt_text=prompt["text"])
+        except ExtractionError as exc:
+            results.append({"story": row, "tags": None, "error": str(exc)})
+        else:
+            results.append({"story": row, "tags": tags, "error": None})
+    return results
+
+
+@app.route("/prompts/<int:prompt_id>/preview", methods=["POST"])
+def preview_prompt(prompt_id: int):
+    conn = get_db()
+    prompt = db.get_prompt(conn, prompt_id)
+    if prompt is None:
+        return "prompt not found", 404
+    model = request.form.get("model", "").strip()
+    sample_size = request.form.get("sample_size", 5, type=int)
+    stories = db.random_stories(conn, sample_size)
+    results = _run_prompt_preview(prompt, model, stories)
+    return render_template("prompt_preview.html", prompt=prompt, results=results, model=model)
+
+
+@app.route("/story/<story_id>/prompts/preview", methods=["POST"])
+def preview_prompt_on_story(story_id: str):
+    conn = get_db()
+    prompt_id = request.form.get("prompt_id", type=int)
+    prompt = db.get_prompt(conn, prompt_id) if prompt_id else None
+    story = db.get_story(conn, story_id)
+    if prompt is None or story is None:
+        return "not found", 404
+    model = request.form.get("model", "").strip()
+    results = _run_prompt_preview(prompt, model, [story])
+    return render_template("prompt_preview.html", prompt=prompt, results=results, model=model, target_story=story)
+
+
+@app.route("/jobs")
+def jobs_list():
+    conn = get_db()
+    prompts = db.list_prompts(conn)
+    if not prompts:
+        _seed_default_prompt(conn)
+        conn.commit()
+        prompts = db.list_prompts(conn)
+    jobs = db.list_jobs(conn)
+    return render_template("jobs.html", jobs=jobs, prompts=prompts)
+
+
+def _seed_default_prompt(conn: sqlite3.Connection) -> None:
+    from storyindex.classify import load_prompt_template
+
+    try:
+        text = load_prompt_template("v1")
+    except Exception:
+        return
+    db.ensure_seed_prompt(conn, "default (v1)", text, _now())
+
+
+@app.route("/jobs/<int:job_id>")
+def job_detail(job_id: int):
+    conn = get_db()
+    job = db.get_job(conn, job_id)
+    if job is None:
+        return "job not found", 404
+    return render_template("job_detail.html", job=job)
+
+
+@app.route("/jobs/<int:job_id>/status.json")
+def job_status_json(job_id: int):
+    conn = get_db()
+    job = db.get_job(conn, job_id)
+    if job is None:
+        return {"error": "not found"}, 404
+    return {
+        "status": job["status"], "total": job["total"], "done": job["done"],
+        "failed": job["failed"], "error": job["error"],
+    }
+
+
+@app.route("/jobs/extract", methods=["POST"])
+def create_extract_job():
+    conn = get_db()
+    prompt_id = request.form.get("prompt_id", type=int)
+    model = request.form.get("model", "").strip()
+    scope = request.form.get("scope", "all")
+    if not prompt_id or not model:
+        return redirect(url_for("jobs_list"))
+    job_id = db.create_job(conn, "extract", _now(), prompt_id=prompt_id, model=model, scope=scope)
+    conn.commit()
+    _spawn_job(job_id)
+    return redirect(url_for("job_detail", job_id=job_id))
+
+
+@app.route("/jobs/cluster", methods=["POST"])
+def create_cluster_job():
+    conn = get_db()
+    model = request.form.get("model", "").strip() or None
+    job_id = db.create_job(conn, "cluster", _now(), model=model)
+    conn.commit()
+    _spawn_job(job_id)
+    return redirect(url_for("job_detail", job_id=job_id))
 
 
 @app.route("/tags")

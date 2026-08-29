@@ -23,7 +23,7 @@ import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from storyindex import db
+from storyindex import db, settings
 from storyindex.classify import ExtractionError, extract_tags
 from storyindex.cluster import DEFAULT_EMBED_MODEL, canonical_name, cluster_tag_texts
 from storyindex.signature import StorySignature
@@ -78,11 +78,12 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
         db.mark_job_running(conn, job_id, _now(), os.getpid())
         conn.commit()
 
+        host = settings.load()["ollama_host"]
         since_commit = 0
         for row in stories:
             sig = row_to_sig(row)
             try:
-                tags = extract_tags(sig, model=job["model"], prompt_text=prompt["text"])
+                tags = extract_tags(sig, model=job["model"], prompt_text=prompt["text"], host=host)
             except ExtractionError as exc:
                 db.increment_job_progress(conn, job_id, failed=1)
                 db.record_job_error(conn, job_id, f"{row['title']} ({row['id']})", str(exc), _now())
@@ -130,7 +131,8 @@ def run_cluster_job(db_path: Path, job_id: int) -> None:
         db.mark_job_running(conn, job_id, _now(), os.getpid())
         conn.commit()
 
-        clusters = cluster_tag_texts(distinct_texts, model=embed_model)
+        host = settings.load()["ollama_host"]
+        clusters = cluster_tag_texts(distinct_texts, model=embed_model, host=host)
 
         since_commit = 0
         for cluster in clusters:

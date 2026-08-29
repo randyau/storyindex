@@ -10,7 +10,7 @@
 <form method="post" action="{{ url_for('ollama_start') }}">
   <button>start ollama</button>
 </form>
-<p class="muted">requires the <code>ollama</code> CLI to be installed and on PATH. if it's already running elsewhere (a different host/port), this page only checks {{ "http://localhost:11434" }}.</p>
+<p class="muted">requires the <code>ollama</code> CLI to be installed and on PATH. this page checks <code>{{ host }}</code> — change it on the <a href="{{ url_for('settings_page') }}">settings page</a> if your server runs elsewhere.</p>
 {% endif %}
 
 {% if models %}

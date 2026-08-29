@@ -37,7 +37,7 @@ def test_preview_prompt_random_sample(tmp_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text: ["mystery"])
+    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None: ["mystery"])
     client = _client(dbpath)
     r = client.post(f"/prompts/{prompt_id}/preview", data={"model": "m", "sample_size": "5"})
     assert r.status_code == 200
@@ -55,7 +55,7 @@ def test_preview_prompt_on_specific_story(tmp_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text: ["theme-x"])
+    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None: ["theme-x"])
     client = _client(dbpath)
     r = client.post(
         "/story/s1/prompts/preview",
@@ -88,7 +88,7 @@ def test_create_extract_job_runs_to_completion(tmp_path, make_sig, monkeypatch):
     # bare test env, and no point testing subprocess mechanics here) - run
     # the job inline instead, monkeypatching the model call.
     from storyindex import jobs as jobs_module
-    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text: ["x"])
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
     monkeypatch.setattr("storyindex.app._spawn_job", lambda job_id: jobs_module.run_extract_job(dbpath, job_id))
 
     client = _client(dbpath)

@@ -16,15 +16,25 @@ from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
 
-from storyindex import db, libraries
+from storyindex import db, libraries, settings
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
 app.config["LIBRARIES_PATH"] = libraries.DEFAULT_CONFIG_PATH
+app.config["SETTINGS_PATH"] = settings.DEFAULT_CONFIG_PATH
 
 
 def _libraries_path() -> Path:
     return app.config["LIBRARIES_PATH"]
+
+
+def _settings_path() -> Path:
+    return app.config["SETTINGS_PATH"]
+
+
+@app.context_processor
+def _inject_settings() -> dict:
+    return {"settings": settings.load(_settings_path())}
 
 SRC_DIR = Path(__file__).resolve().parent.parent
 
@@ -285,11 +295,12 @@ def _run_prompt_preview(prompt: sqlite3.Row, model: str, stories: list[sqlite3.R
     from storyindex.classify import ExtractionError, extract_tags
     from storyindex.jobs import row_to_sig
 
+    host = settings.load(_settings_path())["ollama_host"]
     results = []
     for row in stories:
         sig = row_to_sig(row)
         try:
-            tags = extract_tags(sig, model=model, prompt_text=prompt["text"])
+            tags = extract_tags(sig, model=model, prompt_text=prompt["text"], host=host)
         except ExtractionError as exc:
             results.append({"story": row, "tags": None, "error": str(exc)})
         else:
@@ -327,11 +338,12 @@ def preview_prompt_on_story(story_id: str):
 def ollama_status():
     from storyindex import ollama_client
 
-    running = ollama_client.is_running()
-    models = ollama_client.list_models() if running else []
+    host = settings.load(_settings_path())["ollama_host"]
+    running = ollama_client.is_running(host=host)
+    models = ollama_client.list_models(host=host) if running else []
     return render_template(
         "ollama.html", running=running, models=models,
-        recommended=ollama_client.RECOMMENDED_MODELS,
+        recommended=ollama_client.RECOMMENDED_MODELS, host=host,
     )
 
 
@@ -341,6 +353,24 @@ def ollama_start():
 
     ollama_client.start_server()
     return redirect(url_for("ollama_status"))
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings_page():
+    if request.method == "POST":
+        settings.update(
+            {
+                "theme": request.form.get("theme", "dark").strip(),
+                "ollama_host": request.form.get("ollama_host", "").strip() or settings.DEFAULTS["ollama_host"],
+                "default_extract_model": request.form.get("default_extract_model", "").strip()
+                or settings.DEFAULTS["default_extract_model"],
+                "default_embed_model": request.form.get("default_embed_model", "").strip()
+                or settings.DEFAULTS["default_embed_model"],
+            },
+            _settings_path(),
+        )
+        return redirect(url_for("settings_page"))
+    return render_template("settings.html", current=settings.load(_settings_path()))
 
 
 @app.route("/jobs")

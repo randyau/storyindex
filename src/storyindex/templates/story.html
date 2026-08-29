@@ -60,7 +60,7 @@
     <select name="prompt_id">
       {% for p in prompts %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
     </select>
-    <input type="text" name="model" value="qwen2.5:14b-instruct" style="width:12rem">
+    <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:12rem">
     <input type="submit" value="preview">
   </form>
 </p>

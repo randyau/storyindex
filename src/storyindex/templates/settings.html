@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}settings — storyindex{% endblock %}
+{% block content %}
+<h2>settings</h2>
+<p class="muted">stored in <code>~/.storyindex/settings.json</code> — applies to this machine, not any one library.</p>
+
+<form method="post" action="{{ url_for('settings_page') }}">
+  <h3>appearance</h3>
+  <p>
+    <label><input type="radio" name="theme" value="dark" {% if current.theme == 'dark' %}checked{% endif %}> dark (default)</label><br>
+    <label><input type="radio" name="theme" value="light" {% if current.theme == 'light' %}checked{% endif %}> light</label>
+  </p>
+
+  <h3>ollama connection</h3>
+  <p class="muted">where extraction/embedding jobs and the <a href="{{ url_for('ollama_status') }}">ollama status page</a> look for a local model server.</p>
+  <p><label>host: <input type="text" name="ollama_host" value="{{ current.ollama_host }}" style="width:20rem"></label></p>
+
+  <h3>default models</h3>
+  <p class="muted">pre-fills the model field on job/prompt-preview forms — just a starting point, editable per run.</p>
+  <p><label>extraction model: <input type="text" name="default_extract_model" value="{{ current.default_extract_model }}" style="width:20rem"></label></p>
+  <p><label>embedding model: <input type="text" name="default_embed_model" value="{{ current.default_embed_model }}" style="width:20rem"></label></p>
+
+  <p><input type="submit" value="save settings"></p>
+</form>
+{% endblock %}

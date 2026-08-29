@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storyindex.ollama_client import OllamaError, generate_json
+from storyindex.ollama_client import DEFAULT_HOST, OllamaError, generate_json
 from storyindex.signature import StorySignature
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
@@ -61,6 +61,7 @@ def extract_tags(
     sig: StorySignature,
     model: str,
     prompt_text: str,
+    host: str = DEFAULT_HOST,
 ) -> list[str]:
     """Run the extraction pass for one story against a given prompt
     template's text. Returns a deduped, cleaned list of candidate tag
@@ -73,7 +74,7 @@ def extract_tags(
     prompt = build_prompt(prompt_text, sig)
 
     try:
-        result = generate_json(prompt, model=model)
+        result = generate_json(prompt, model=model, host=host)
     except OllamaError as exc:
         raise ExtractionError(f"story {sig.id}: {exc}") from exc
 

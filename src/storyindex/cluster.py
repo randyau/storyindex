@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from storyindex.ollama_client import embed
+from storyindex.ollama_client import DEFAULT_HOST, embed
 
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 DEFAULT_SIMILARITY_THRESHOLD = 0.82
@@ -49,6 +49,7 @@ def cluster_tag_texts(
     texts: list[str],
     model: str = DEFAULT_EMBED_MODEL,
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+    host: str = DEFAULT_HOST,
 ) -> list[Cluster]:
     """Greedy single-pass clustering: each text joins the most similar
     existing cluster if similarity exceeds threshold, else starts a new
@@ -56,7 +57,7 @@ def cluster_tag_texts(
     a human reviews, not meant to be a stable/optimal partition."""
     clusters: list[Cluster] = []
     for text in texts:
-        vec = embed(text, model=model)
+        vec = embed(text, model=model, host=host)
         best_cluster = None
         best_sim = -1.0
         for c in clusters:

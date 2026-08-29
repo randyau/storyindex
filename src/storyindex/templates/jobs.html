@@ -13,7 +13,7 @@
       {% endfor %}
     </select>
   </label>
-  <label>model: <input type="text" name="model" value="qwen2.5:14b-instruct" style="width:14rem"></label>
+  <label>model: <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:14rem"></label>
   <label>scope:
     <select name="scope">
       <option value="all">all stories</option>
@@ -27,7 +27,7 @@
 <h3>start a clustering pass</h3>
 <p class="muted">folds any pending tag_candidates into the canonical tag vocabulary.</p>
 <form method="post" action="{{ url_for('create_cluster_job') }}">
-  <label>embedding model: <input type="text" name="model" value="nomic-embed-text" style="width:14rem"></label>
+  <label>embedding model: <input type="text" name="model" value="{{ settings.default_embed_model }}" style="width:14rem"></label>
   <input type="submit" value="start">
 </form>
 

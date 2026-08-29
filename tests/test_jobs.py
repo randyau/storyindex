@@ -31,7 +31,7 @@ def test_extract_job_happy_path(db_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(jobs, "extract_tags", lambda sig, model, prompt_text: ["alpha", "beta"])
+    monkeypatch.setattr(jobs, "extract_tags", lambda sig, model, prompt_text, host=None: ["alpha", "beta"])
 
     jobs.run_extract_job(db_path, job_id)
 
@@ -75,7 +75,7 @@ def test_extract_job_partial_failures_still_completes(db_path, make_sig, monkeyp
 
     calls = {"n": 0}
 
-    def flaky(sig, model, prompt_text):
+    def flaky(sig, model, prompt_text, host=None):
         calls["n"] += 1
         if calls["n"] == 2:
             raise ExtractionError("boom")
@@ -107,7 +107,7 @@ def test_extract_job_scope_untagged_only(db_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(jobs, "extract_tags", lambda sig, model, prompt_text: ["x"])
+    monkeypatch.setattr(jobs, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
     jobs.run_extract_job(db_path, job_id)
 
     conn = db.connect(db_path)
@@ -129,7 +129,7 @@ def test_cluster_job_folds_candidates_into_tags(db_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    def fake_cluster(texts, model):
+    def fake_cluster(texts, model, host=None):
         c = Cluster()
         for t in texts:
             c.add(t, [1.0])

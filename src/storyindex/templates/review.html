@@ -4,26 +4,26 @@
 {% block content %}
 <h2>review queue{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
 <p class="muted">
-{{ total }} stor{{ 'y' if total == 1 else 'ies' }} with model-proposed tags awaiting approval.
-Approve to keep a tag (folds it into the human-confirmed set), reject to drop it.
-{% if job_id %}<a href="{{ url_for('review_queue') }}">show all pending, not just this job</a>{% endif %}
+{{ total }} tag{{ 's' if total != 1 }} with model-proposed links still awaiting approval, most-applied first.
+Approving a tag keeps it everywhere it's pending; rejecting drops it everywhere it's pending.
+Expand a tag to spot-check the stories it landed on before deciding.
+<a href="{{ url_for('review_stories_queue', job_id=job_id) }}">switch to per-story view</a>
+{% if job_id %}· <a href="{{ url_for('review_queue') }}">show all pending, not just this job</a>{% endif %}
 </p>
 
-{% for item in items %}
-<div class="review-item">
-  <h3><a href="{{ url_for('story_detail', story_id=item['story']['id']) }}">{{ item['story']['title'] }}</a></h3>
-  <p class="muted">by {{ item['story']['author'] }}</p>
-  <p>
-  {% for t in item['tags'] %}
-    {{ m.tag_pill(t['name'],
-                  approve_action=url_for('approve_tag', story_id=item['story']['id'], tag_id=t['id']),
-                  delete_action=url_for('delete_tag', story_id=item['story']['id'], tag_id=t['id']),
-                  delete_title='reject') }}
-  {% endfor %}
-  </p>
-  {{ m.action_form(url_for('approve_all_tags', story_id=item['story']['id']), 'approve all', hidden={'next': url_for('review_queue', page=page, job_id=job_id)}) }}
-  {{ m.action_form(url_for('reject_all_tags', story_id=item['story']['id']), 'reject all', hidden={'next': url_for('review_queue', page=page, job_id=job_id)}) }}
-</div>
+{% for t in tags %}
+<details class="review-item">
+  <summary>
+    <strong>{{ t['name'] }}</strong>
+    <span class="muted">— {{ t['story_count'] }} stor{{ 'y' if t['story_count'] == 1 else 'ies' }}</span>
+  </summary>
+  {{ m.story_list(stories_by_tag.get(t['id'], []), show_author=True) }}
+  {{ m.action_form(url_for('approve_pending_tag', tag_id=t['id']), 'approve all',
+                    hidden={'job_id': job_id or '', 'next': url_for('review_queue', page=page, job_id=job_id)}) }}
+  {{ m.action_form(url_for('reject_pending_tag', tag_id=t['id']), 'reject all',
+                    confirm='Reject this tag from every story it is pending on?',
+                    hidden={'job_id': job_id or '', 'next': url_for('review_queue', page=page, job_id=job_id)}) }}
+</details>
 {% else %}
 <p class="muted">nothing pending — the review queue is clear.</p>
 {% endfor %}

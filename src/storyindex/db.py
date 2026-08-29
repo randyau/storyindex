@@ -1274,6 +1274,98 @@ def count_pending_review(conn: sqlite3.Connection, job_id: int | None = None) ->
     return row[0]
 
 
+def pending_review_tags(
+    conn: sqlite3.Connection, limit: int = 25, offset: int = 0, job_id: int | None = None
+) -> list[sqlite3.Row]:
+    """Distinct tags with at least one model-proposed (not yet approved)
+    link, most-applied first — the tag-centric review view. A model tends
+    to make the same mistake repeatedly (one bad tag on 40 stories) far
+    more often than 40 unrelated mistakes, so reviewing "is this tag right"
+    once per tag is normally a much smaller job than stories_pending_review's
+    once-per-story queue, even though both cover the same underlying set of
+    pending story_tags rows."""
+    conn.row_factory = sqlite3.Row
+    job_clause = "AND st.job_id = ?" if job_id is not None else ""
+    params = (job_id,) if job_id is not None else ()
+    rows = conn.execute(
+        f"""
+        SELECT t.id, t.name, COUNT(DISTINCT st.story_id) AS story_count
+        FROM tags t
+        JOIN story_tags st ON st.tag_id = t.id AND st.source = 'model' {job_clause}
+        GROUP BY t.id
+        ORDER BY story_count DESC, t.name ASC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, limit, offset),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def count_pending_review_tags(conn: sqlite3.Connection, job_id: int | None = None) -> int:
+    job_clause = "AND job_id = ?" if job_id is not None else ""
+    params = (job_id,) if job_id is not None else ()
+    return conn.execute(
+        f"SELECT COUNT(DISTINCT tag_id) FROM story_tags WHERE source = 'model' {job_clause}",
+        params,
+    ).fetchone()[0]
+
+
+def pending_review_stories_for_tags(
+    conn: sqlite3.Connection, tag_ids: list[int], job_id: int | None = None
+) -> dict[int, list[sqlite3.Row]]:
+    """Spot-check data for a page of pending_review_tags rows: every story
+    still carrying a pending link to each of the given tags, one query for
+    the whole page rather than one per tag (same reasoning as
+    stories_pending_review's story_ids batching)."""
+    if not tag_ids:
+        return {}
+    conn.row_factory = sqlite3.Row
+    job_clause = "AND st.job_id = ?" if job_id is not None else ""
+    placeholders = ",".join("?" for _ in tag_ids)
+    params = (*tag_ids, *((job_id,) if job_id is not None else ()))
+    rows = conn.execute(
+        f"""
+        SELECT st.tag_id, s.id, s.title, s.author
+        FROM story_tags st
+        JOIN stories s ON s.id = st.story_id
+        WHERE st.tag_id IN ({placeholders}) AND st.source = 'model' {job_clause}
+        ORDER BY s.title ASC
+        """,
+        params,
+    ).fetchall()
+    conn.row_factory = None
+    by_tag: dict[int, list[sqlite3.Row]] = {tid: [] for tid in tag_ids}
+    for row in rows:
+        by_tag[row["tag_id"]].append(row)
+    return by_tag
+
+
+def approve_tag_pending(conn: sqlite3.Connection, tag_id: int, job_id: int | None = None) -> None:
+    """Bulk-approve every still-pending (source='model') link to this tag,
+    optionally scoped to one job's output - the tag-centric counterpart to
+    approve_all_story_tags."""
+    job_clause = "AND job_id = ?" if job_id is not None else ""
+    params = (tag_id, job_id) if job_id is not None else (tag_id,)
+    conn.execute(
+        f"UPDATE story_tags SET source = 'human' WHERE tag_id = ? AND source = 'model' {job_clause}",
+        params,
+    )
+
+
+def reject_tag_pending(conn: sqlite3.Connection, tag_id: int, job_id: int | None = None) -> None:
+    """Bulk-reject (delete) every still-pending link to this tag, optionally
+    scoped to one job. Mirrors reject_all_story_tags's behavior of leaving
+    the tag row itself and tag_candidates alone (a later clustering pass
+    can still re-propose it) even if this empties every link to it."""
+    job_clause = "AND job_id = ?" if job_id is not None else ""
+    params = (tag_id, job_id) if job_id is not None else (tag_id,)
+    conn.execute(
+        f"DELETE FROM story_tags WHERE tag_id = ? AND source = 'model' {job_clause}",
+        params,
+    )
+
+
 def stories_pending_review(
     conn: sqlite3.Connection, limit: int = 25, offset: int = 0, job_id: int | None = None
 ) -> list[dict]:

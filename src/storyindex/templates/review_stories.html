@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m with context %}
+{% block title %}review queue (per-story) — storyindex{% endblock %}
+{% block content %}
+<h2>review queue — per story{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
+<p class="muted">
+{{ total }} stor{{ 'y' if total == 1 else 'ies' }} with model-proposed tags awaiting approval.
+Approve to keep a tag (folds it into the human-confirmed set), reject to drop it.
+<a href="{{ url_for('review_queue', job_id=job_id) }}">switch to tag-centric view</a>
+{% if job_id %}· <a href="{{ url_for('review_stories_queue') }}">show all pending, not just this job</a>{% endif %}
+</p>
+
+{% for item in items %}
+<div class="review-item">
+  <h3><a href="{{ url_for('story_detail', story_id=item['story']['id']) }}">{{ item['story']['title'] }}</a></h3>
+  <p class="muted">by {{ item['story']['author'] }}</p>
+  <p>
+  {% for t in item['tags'] %}
+    {{ m.tag_pill(t['name'],
+                  approve_action=url_for('approve_tag', story_id=item['story']['id'], tag_id=t['id']),
+                  delete_action=url_for('delete_tag', story_id=item['story']['id'], tag_id=t['id']),
+                  delete_title='reject') }}
+  {% endfor %}
+  </p>
+  {{ m.action_form(url_for('approve_all_tags', story_id=item['story']['id']), 'approve all', hidden={'next': url_for('review_stories_queue', page=page, job_id=job_id)}) }}
+  {{ m.action_form(url_for('reject_all_tags', story_id=item['story']['id']), 'reject all', hidden={'next': url_for('review_stories_queue', page=page, job_id=job_id)}) }}
+</div>
+{% else %}
+<p class="muted">nothing pending — the review queue is clear.</p>
+{% endfor %}
+
+{{ m.pager(page, has_next, 'review_stories_queue', {'job_id': job_id}) }}
+{% endblock %}

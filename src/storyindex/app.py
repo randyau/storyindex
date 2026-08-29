@@ -369,6 +369,51 @@ def reject_all_tags(story_id: str):
 
 @app.route("/review")
 def review_queue():
+    """Tag-centric review: one row per pending tag (most-applied first)
+    rather than one row per story - a model's mistakes tend to repeat
+    across many stories, so approving/rejecting a whole tag at once
+    usually clears far more of the queue per decision than the per-story
+    view at /review/stories. Each tag's row carries every story still
+    pending under it, so a reviewer can spot-check the actual stories
+    before bulk-approving or -rejecting."""
+    conn = get_db()
+    page = max(request.args.get("page", 1, type=int), 1)
+    job_id = request.args.get("job_id", type=int)
+    offset = (page - 1) * TAGS_PAGE_SIZE
+    tags = db.pending_review_tags(conn, limit=TAGS_PAGE_SIZE, offset=offset, job_id=job_id)
+    total = db.count_pending_review_tags(conn, job_id=job_id)
+    stories_by_tag = db.pending_review_stories_for_tags(conn, [t["id"] for t in tags], job_id=job_id)
+    job = db.get_job(conn, job_id) if job_id else None
+    return render_template(
+        "review.html",
+        tags=tags, stories_by_tag=stories_by_tag, page=page, total=total,
+        job_id=job_id, job=job, has_next=offset + len(tags) < total,
+    )
+
+
+@app.route("/review/tags/<int:tag_id>/approve", methods=["POST"])
+def approve_pending_tag(tag_id: int):
+    conn = get_db()
+    job_id = request.form.get("job_id", type=int)
+    db.approve_tag_pending(conn, tag_id, job_id=job_id)
+    conn.commit()
+    return redirect(request.form.get("next") or url_for("review_queue", job_id=job_id))
+
+
+@app.route("/review/tags/<int:tag_id>/reject", methods=["POST"])
+def reject_pending_tag(tag_id: int):
+    conn = get_db()
+    job_id = request.form.get("job_id", type=int)
+    db.reject_tag_pending(conn, tag_id, job_id=job_id)
+    conn.commit()
+    return redirect(request.form.get("next") or url_for("review_queue", job_id=job_id))
+
+
+@app.route("/review/stories")
+def review_stories_queue():
+    """Per-story review queue - the original view, kept for cases where
+    the tag-centric /review view above is too coarse (e.g. double-checking
+    one specific story's full tag set)."""
     conn = get_db()
     page = max(request.args.get("page", 1, type=int), 1)
     job_id = request.args.get("job_id", type=int)
@@ -377,7 +422,7 @@ def review_queue():
     total = db.count_pending_review(conn, job_id=job_id)
     job = db.get_job(conn, job_id) if job_id else None
     return render_template(
-        "review.html",
+        "review_stories.html",
         items=items, page=page, total=total, job_id=job_id, job=job,
         has_next=offset + len(items) < total,
     )

@@ -3,7 +3,7 @@
 {% block content %}
 <h2>{{ story['title'] }}</h2>
 <p class="muted">
-  by {{ story['author'] }}
+  by <a href="{{ url_for('author_detail', author=story['author']) }}">{{ story['author'] }}</a>
   {% if story['status'] == 'removed' %}
   · <strong>removed from the library</strong> ({{ story['removed_at'] }})
   <form method="post" action="{{ url_for('restore_story', story_id=story['id']) }}" style="display:inline"><button>restore</button></form>

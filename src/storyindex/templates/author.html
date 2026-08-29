@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ author }} — storyindex{% endblock %}
+{% block content %}
+<h2>{{ author }}</h2>
+<ul class="story-list">
+{% for s in stories %}
+  <li>
+    <a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a>
+    {% if s['part_index'] > 0 %}<span class="muted">part {{ s['part_index'] + 1 }}</span>{% endif %}
+  </li>
+{% else %}
+  <li class="muted">no stories by this author.</li>
+{% endfor %}
+</ul>
+{% endblock %}

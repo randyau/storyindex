@@ -141,6 +141,42 @@ def story_detail(story_id: str):
     )
 
 
+@app.route("/stories/removed")
+def removed_stories():
+    conn = get_db()
+    stories = db.list_removed_stories(conn)
+    return render_template("removed_stories.html", stories=stories)
+
+
+@app.route("/stories/new", methods=["GET", "POST"])
+def new_story():
+    if request.method == "GET":
+        return render_template("new_story.html")
+    conn = get_db()
+    title = request.form.get("title", "").strip()
+    author = request.form.get("author", "").strip()
+    body_text = request.form.get("body_text", "").strip()
+    if not title or not body_text:
+        return render_template(
+            "new_story.html", error="title and story text are required",
+            title=title, author=author, body_text=body_text,
+        )
+    import hashlib
+    import uuid
+
+    story_id = hashlib.sha1(f"manual-{uuid.uuid4()}".encode("utf-8")).hexdigest()
+    db.create_manual_story(conn, story_id, title, author or "Unknown", body_text, _now())
+    conn.commit()
+    return redirect(url_for("story_detail", story_id=story_id))
+
+
+@app.route("/author/<path:author>")
+def author_detail(author: str):
+    conn = get_db()
+    stories = db.stories_for_author(conn, author)
+    return render_template("author.html", author=author, stories=stories)
+
+
 @app.route("/story/<story_id>/remove", methods=["POST"])
 def remove_story(story_id: str):
     conn = get_db()
@@ -450,6 +486,30 @@ def switch_library():
     return redirect(url_for("index"))
 
 
+@app.route("/libraries/remove", methods=["POST"])
+def remove_library():
+    name = request.form.get("name", "").strip()
+    data = libraries.load(_libraries_path())
+    if name in data["libraries"]:
+        libraries.unregister(name, _libraries_path())
+        data = libraries.load(_libraries_path())
+        if data.get("active"):
+            app.config["DB_PATH"] = Path(data["libraries"][data["active"]])
+    return redirect(url_for("libraries_list"))
+
+
+@app.route("/libraries/rename", methods=["POST"])
+def rename_library_route():
+    old_name = request.form.get("old_name", "").strip()
+    new_name = request.form.get("new_name", "").strip()
+    if old_name and new_name:
+        try:
+            libraries.rename_library(old_name, new_name, _libraries_path())
+        except KeyError:
+            pass
+    return redirect(url_for("libraries_list"))
+
+
 @app.route("/tags")
 def tags_admin():
     conn = get_db()
@@ -466,6 +526,14 @@ def rename_tag(tag_id: int):
         db.rename_tag(conn, tag_id, new_name)
         conn.commit()
     return redirect(url_for("tags_admin"))
+
+@app.route("/tags/<int:tag_id>/delete", methods=["POST"])
+def delete_tag_route(tag_id: int):
+    conn = get_db()
+    db.delete_tag(conn, tag_id)
+    conn.commit()
+    return redirect(url_for("tags_admin"))
+
 
 @app.route("/tags/merge", methods=["POST"])
 def merge_tags():

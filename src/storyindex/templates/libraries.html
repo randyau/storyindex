@@ -17,6 +17,15 @@
       <input type="submit" value="switch">
     </form>
     {% endif %}
+    <form method="post" action="{{ url_for('rename_library_route') }}" style="display:inline">
+      <input type="hidden" name="old_name" value="{{ name }}">
+      <input type="text" name="new_name" placeholder="new name" style="width:8rem">
+      <input type="submit" value="rename">
+    </form>
+    <form method="post" action="{{ url_for('remove_library') }}" style="display:inline" onsubmit="return confirm('Forget library &quot;{{ name }}&quot;? Its sqlite file is not deleted, just removed from this list.')">
+      <input type="hidden" name="name" value="{{ name }}">
+      <button>remove</button>
+    </form>
   </td>
 </tr>
 {% else %}

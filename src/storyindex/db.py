@@ -737,6 +737,17 @@ def _now_iso() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
+def list_removed_stories(conn: sqlite3.Connection, limit: int = 100) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, title, author, removed_at FROM stories "
+        "WHERE status = 'removed' ORDER BY removed_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
 def stories_by_author(
     conn: sqlite3.Connection, author: str, exclude_group_id: str, limit: int = 10
 ) -> list[sqlite3.Row]:
@@ -755,6 +766,56 @@ def stories_by_author(
     ).fetchall()
     conn.row_factory = None
     return rows
+
+
+def create_manual_story(
+    conn: sqlite3.Connection, story_id: str, title: str, author: str, body_text: str, ingested_at: str
+) -> None:
+    """A story typed/pasted straight into the UI, no parser involved.
+    group_id/source_relpath/content_hash still need real values (other
+    code assumes they exist) so we use the story's own id as a
+    standalone group and 'manual-entry' as a recognizable relpath."""
+    conn.execute(
+        """
+        INSERT INTO stories
+            (id, group_id, part_index, title, author, body_text,
+             source_relpath, content_hash, ingested_at)
+        VALUES (?, ?, 0, ?, ?, ?, 'manual-entry', ?, ?)
+        """,
+        (story_id, story_id, title, author, body_text, _sha1(body_text), ingested_at),
+    )
+
+
+def _sha1(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def stories_for_author(conn: sqlite3.Connection, author: str) -> list[sqlite3.Row]:
+    """Every story/part by this exact author name, for a dedicated browse
+    page (unlike stories_by_author, this doesn't exclude any group)."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT id, group_id, part_index, title, author
+        FROM stories
+        WHERE author = ? AND status = 'active'
+        ORDER BY title ASC, part_index ASC
+        """,
+        (author,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def delete_tag(conn: sqlite3.Connection, tag_id: int) -> None:
+    """Removes the tag and every story's link to it. Leaves tag_candidates
+    (pre-clustering raw text, a separate pipeline stage) untouched, so a
+    later clustering pass can still re-propose it if it's genuinely
+    common — this only removes the curated tag, not the model's opinion."""
+    conn.execute("DELETE FROM story_tags WHERE tag_id = ?", (tag_id,))
+    conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
 
 
 def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> None:

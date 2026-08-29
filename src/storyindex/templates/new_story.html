@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}add a story — storyindex{% endblock %}
+{% block content %}
+<h2>add a story</h2>
+<p class="muted">for a single story you have text for already — no parser needed. For a whole folder of files, use <a href="{{ url_for('jobs_list') }}">sync a library from disk</a> instead.</p>
+{% if error %}<p style="color:#a00">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('new_story') }}">
+  <p><label>title: <input type="text" name="title" value="{{ title or '' }}" style="width:24rem"></label></p>
+  <p><label>author: <input type="text" name="author" value="{{ author or '' }}" style="width:16rem" placeholder="Unknown"></label></p>
+  <p><label>story text:<br><textarea name="body_text" rows="20" style="width:100%">{{ body_text or '' }}</textarea></label></p>
+  <input type="submit" value="add story">
+</form>
+{% endblock %}

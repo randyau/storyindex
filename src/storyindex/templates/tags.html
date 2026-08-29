@@ -18,7 +18,7 @@
 
 <h2>manage tags</h2>
 <table>
-<tr><th>name</th><th>stories</th><th>rename</th></tr>
+<tr><th>name</th><th>stories</th><th>rename</th><th></th></tr>
 {% for t in tags %}
 <tr>
   <td><a href="{{ url_for('tag_detail', tag_id=t['id']) }}">{{ t['name'] }}</a></td>
@@ -29,9 +29,14 @@
       <input type="submit" value="rename">
     </form>
   </td>
+  <td>
+    <form method="post" action="{{ url_for('delete_tag_route', tag_id=t['id']) }}" style="display:inline" onsubmit="return confirm('Delete tag &quot;{{ t['name'] }}&quot;? Removes it from every story it is linked to.')">
+      <button>delete</button>
+    </form>
+  </td>
 </tr>
 {% else %}
-<tr><td colspan="3" class="muted">no tags yet.</td></tr>
+<tr><td colspan="4" class="muted">no tags yet.</td></tr>
 {% endfor %}
 </table>
 

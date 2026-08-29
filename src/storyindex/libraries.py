@@ -57,6 +57,30 @@ def set_active(name: str, config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
     return data
 
 
+def unregister(name: str, config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
+    """Forgets a library (does not touch its sqlite file on disk — this
+    only removes it from the switcher). Clears `active` if it was the
+    active one; the caller is responsible for picking a new active
+    library before the next request that needs one."""
+    data = load(config_path)
+    data["libraries"].pop(name, None)
+    if data["active"] == name:
+        data["active"] = next(iter(data["libraries"]), None)
+    save(data, config_path)
+    return data
+
+
+def rename_library(old_name: str, new_name: str, config_path: Path = DEFAULT_CONFIG_PATH) -> dict:
+    data = load(config_path)
+    if old_name not in data["libraries"]:
+        raise KeyError(f"no such library: {old_name!r}")
+    data["libraries"][new_name] = data["libraries"].pop(old_name)
+    if data["active"] == old_name:
+        data["active"] = new_name
+    save(data, config_path)
+    return data
+
+
 def ensure_registered_and_active(name: str, db_path: str, config_path: Path = DEFAULT_CONFIG_PATH) -> None:
     """Bootstrap: called at app startup with the --db path. Registers it
     under `name` if not already known, and makes it active if nothing else

@@ -27,8 +27,10 @@
 <body>
 <nav>
   <a href="{{ url_for('index') }}">browse</a>
+  <a href="{{ url_for('new_story') }}">add story</a>
   <a href="{{ url_for('review_queue') }}">review queue</a>
   <a href="{{ url_for('tags_admin') }}">manage tags</a>
+  <a href="{{ url_for('removed_stories') }}">removed</a>
   <a href="{{ url_for('jobs_list') }}">jobs</a>
   <a href="{{ url_for('prompts_list') }}">prompts</a>
   <a href="{{ url_for('ollama_status') }}">ollama</a>

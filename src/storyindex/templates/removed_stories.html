@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}removed stories — storyindex{% endblock %}
+{% block content %}
+<h2>removed stories</h2>
+<p class="muted">hidden from browse/search but not deleted — tags and history are kept, restore any time.</p>
+<table>
+<tr><th>title</th><th>author</th><th>removed</th><th></th></tr>
+{% for s in stories %}
+<tr>
+  <td><a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a></td>
+  <td>{{ s['author'] }}</td>
+  <td class="muted">{{ s['removed_at'] }}</td>
+  <td>
+    <form method="post" action="{{ url_for('restore_story', story_id=s['id']) }}" style="display:inline">
+      <button>restore</button>
+    </form>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="muted">no removed stories.</td></tr>
+{% endfor %}
+</table>
+{% endblock %}

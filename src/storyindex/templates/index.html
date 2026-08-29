@@ -10,6 +10,12 @@
 <p class="muted"><a href="{{ url_for('review_queue') }}">{{ pending_review }} stor{{ 'y' if pending_review == 1 else 'ies' }} with tags awaiting review</a></p>
 {% endif %}
 
+{% if not q and not stories and page == 1 %}
+<p>This library is empty. <a href="{{ url_for('jobs_list') }}">Sync a folder of stories from disk</a> (no
+coding required — a "no adapter needed" mode is available), or
+<a href="{{ url_for('new_story') }}">add one story by hand</a> to get started.</p>
+{% endif %}
+
 <h2>tags</h2>
 <p>
 {% for tag in tags %}

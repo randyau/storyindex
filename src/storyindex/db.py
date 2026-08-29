@@ -105,6 +105,18 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+-- Per-item failure detail for a job (which story, why) — the jobs.failed
+-- counter alone doesn't say which stories or what went wrong.
+CREATE TABLE IF NOT EXISTS job_errors (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER NOT NULL REFERENCES jobs(id),
+    story_ref   TEXT NOT NULL,
+    error       TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_errors_job ON job_errors(job_id);
 """
 
 # FTS5 external-content index over stories, created lazily (see _ensure_fts)
@@ -559,6 +571,23 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True  # exists, just owned by someone else - treat as alive
     return True
+
+
+def record_job_error(conn: sqlite3.Connection, job_id: int, story_ref: str, error: str, created_at: str) -> None:
+    conn.execute(
+        "INSERT INTO job_errors (job_id, story_ref, error, created_at) VALUES (?, ?, ?, ?)",
+        (job_id, story_ref, error, created_at),
+    )
+
+
+def list_job_errors(conn: sqlite3.Connection, job_id: int, limit: int = 200) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT story_ref, error, created_at FROM job_errors WHERE job_id = ? ORDER BY id ASC LIMIT ?",
+        (job_id, limit),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
 
 
 def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:

@@ -83,8 +83,9 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
             sig = row_to_sig(row)
             try:
                 tags = extract_tags(sig, model=job["model"], prompt_text=prompt["text"])
-            except ExtractionError:
+            except ExtractionError as exc:
                 db.increment_job_progress(conn, job_id, failed=1)
+                db.record_job_error(conn, job_id, f"{row['title']} ({row['id']})", str(exc), _now())
             else:
                 db.insert_candidates(
                     conn, story_id=row["id"], tags=tags,
@@ -248,8 +249,9 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
                     ingested_at=_now(), tags=tuple(getattr(fields, "tags", ())),
                 )
                 db.upsert_story(conn, sig)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - one bad file shouldn't abort a 100k-file walk
                 db.increment_job_progress(conn, job_id, failed=1)
+                db.record_job_error(conn, job_id, relpath, str(exc), _now())
             else:
                 db.increment_job_progress(conn, job_id, done=1)
             since_commit += 1

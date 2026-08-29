@@ -90,6 +90,9 @@ def test_extract_job_partial_failures_still_completes(db_path, make_sig, monkeyp
     assert job["total"] == 3
     assert job["done"] == 2
     assert job["failed"] == 1
+    errors = db.list_job_errors(conn, job_id)
+    assert len(errors) == 1
+    assert "boom" in errors[0]["error"]
     conn.close()
 
 

@@ -373,7 +373,8 @@ def job_detail(job_id: int):
     job = db.get_job(conn, job_id)
     if job is None:
         return "job not found", 404
-    return render_template("job_detail.html", job=job)
+    errors = db.list_job_errors(conn, job_id) if job["failed"] else []
+    return render_template("job_detail.html", job=job, errors=errors)
 
 
 @app.route("/jobs/<int:job_id>/status.json")

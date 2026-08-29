@@ -1,10 +1,12 @@
+{% import "_macros.html" as m with context %}
 {% extends "base.html" %}
 {% block title %}jobs — storyindex{% endblock %}
 {% block content %}
 <h2>jobs</h2>
 <p class="muted">jobs that get interrupted (crash, power loss) are automatically marked failed rather than left stuck "running" — already-committed work is never lost or corrupted, just whatever was mid-batch when it stopped. Sync and clustering jobs are safe to just re-run (they skip what's already done); an "untagged stories only" extraction re-run picks up where it left off too.</p>
 
-<h3>start an extraction pass</h3>
+<details>
+<summary><h3 style="display:inline">start an extraction pass</h3></summary>
 <form method="post" action="{{ url_for('create_extract_job') }}">
   <label>prompt:
     <select name="prompt_id">
@@ -23,15 +25,19 @@
   <input type="submit" value="start">
 </form>
 {% if not prompts %}<p class="muted">no prompts saved yet — visit <a href="{{ url_for('prompts_list') }}">prompts</a> to write one.</p>{% endif %}
+</details>
 
-<h3>start a clustering pass</h3>
+<details>
+<summary><h3 style="display:inline">start a clustering pass</h3></summary>
 <p class="muted">folds any pending tag_candidates into the canonical tag vocabulary.</p>
 <form method="post" action="{{ url_for('create_cluster_job') }}">
   <label>embedding model: <input type="text" name="model" value="{{ settings.default_embed_model }}" style="width:14rem"></label>
   <input type="submit" value="start">
 </form>
+</details>
 
-<h3>sync a library from disk</h3>
+<details>
+<summary><h3 style="display:inline">sync a library from disk</h3></summary>
 <p class="muted">re-walks an archive folder and upserts every story page — safe to re-run, reports new/changed stories.</p>
 
 <form method="post" action="{{ url_for('create_sync_job') }}" id="sync-form">
@@ -59,8 +65,29 @@
 
   <p><input type="submit" value="start"></p>
 </form>
+</details>
 
-<h3>history</h3>
+<h3>history <span class="muted">({{ total }})</span></h3>
+<form method="get" action="{{ url_for('jobs_list') }}">
+  <label>type:
+    <select name="type" onchange="this.form.submit()">
+      <option value="">all</option>
+      {% for t in ['extract', 'cluster', 'sync'] %}
+      <option value="{{ t }}" {% if type == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>status:
+    <select name="status" onchange="this.form.submit()">
+      <option value="">all</option>
+      {% for s in ['queued', 'running', 'done', 'failed', 'cancelled'] %}
+      <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <noscript><input type="submit" value="filter"></noscript>
+  {% if status or type %}<a href="{{ url_for('jobs_list') }}">clear</a>{% endif %}
+</form>
 <table>
 <tr><th>id</th><th>type</th><th>status</th><th>progress</th><th>prompt</th><th>model</th><th>created</th></tr>
 {% for j in jobs %}
@@ -74,7 +101,8 @@
   <td class="muted">{{ j['created_at'] }}</td>
 </tr>
 {% else %}
-<tr><td colspan="7" class="muted">no jobs yet.</td></tr>
+<tr><td colspan="7" class="muted">{% if status or type %}no jobs match this filter.{% else %}no jobs yet.{% endif %}</td></tr>
 {% endfor %}
 </table>
+{{ m.pager(page, has_next, 'jobs_list', {'status': status or none, 'type': type or none}) }}
 {% endblock %}

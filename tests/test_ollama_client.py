@@ -65,6 +65,19 @@ def test_start_server_spawns_detached_process(monkeypatch):
     assert kwargs.get("start_new_session") is True
 
 
+def test_start_server_raises_ollama_error_when_cli_missing(monkeypatch):
+    import subprocess
+
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("no such file: ollama")
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    try:
+        ollama_client.start_server()
+        assert False, "expected OllamaError"
+    except ollama_client.OllamaError as exc:
+        assert "ollama" in str(exc)
+
+
 def test_recommended_models_includes_embedding_model():
     names = [m["name"] for m in ollama_client.RECOMMENDED_MODELS]
     assert "nomic-embed-text" in names

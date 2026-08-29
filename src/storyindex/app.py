@@ -86,6 +86,8 @@ def _combined_tag_cloud(conn: sqlite3.Connection) -> list[dict]:
 
 
 PAGE_SIZE = 50
+PROMPTS_PAGE_SIZE = 20
+JOBS_PAGE_SIZE = 25
 
 
 @app.route("/")
@@ -275,8 +277,15 @@ def prompts_list():
     if not db.list_prompts(conn):
         _seed_default_prompt(conn)
         conn.commit()
-    prompts = db.list_prompts(conn)
-    return render_template("prompts.html", prompts=prompts)
+    q = request.args.get("q", "").strip()
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PROMPTS_PAGE_SIZE
+    prompts = db.list_prompts(conn, q=q or None, limit=PROMPTS_PAGE_SIZE, offset=offset)
+    total = db.count_prompts(conn, q=q or None)
+    return render_template(
+        "prompts.html", prompts=prompts, q=q, page=page, total=total,
+        has_next=offset + len(prompts) < total,
+    )
 
 
 @app.route("/prompts/new", methods=["POST"])
@@ -351,7 +360,12 @@ def ollama_status():
 def ollama_start():
     from storyindex import ollama_client
 
-    ollama_client.start_server()
+    try:
+        ollama_client.start_server()
+    except ollama_client.OllamaError as exc:
+        host = settings.load(_settings_path())["ollama_host"]
+        return render_template("ollama.html", running=False, models=[], start_error=str(exc),
+                                recommended=ollama_client.RECOMMENDED_MODELS, host=host)
     return redirect(url_for("ollama_status"))
 
 
@@ -383,8 +397,16 @@ def jobs_list():
         _seed_default_prompt(conn)
         conn.commit()
         prompts = db.list_prompts(conn)
-    jobs = db.list_jobs(conn)
-    return render_template("jobs.html", jobs=jobs, prompts=prompts)
+    status = request.args.get("status", "").strip()
+    type_ = request.args.get("type", "").strip()
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * JOBS_PAGE_SIZE
+    jobs = db.list_jobs(conn, limit=JOBS_PAGE_SIZE, offset=offset, status=status or None, type=type_ or None)
+    total = db.count_jobs(conn, status=status or None, type=type_ or None)
+    return render_template(
+        "jobs.html", jobs=jobs, prompts=prompts, status=status, type=type_,
+        page=page, total=total, has_next=offset + len(jobs) < total,
+    )
 
 
 def _seed_default_prompt(conn: sqlite3.Connection) -> None:

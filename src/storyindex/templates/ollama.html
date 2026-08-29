@@ -7,6 +7,7 @@
 <p style="color:#2a2">● running</p>
 {% else %}
 <p style="color:#a00">● not running</p>
+{% if start_error %}<p style="color:var(--danger)">{{ start_error }}</p>{% endif %}
 <form method="post" action="{{ url_for('ollama_start') }}">
   <button>start ollama</button>
 </form>

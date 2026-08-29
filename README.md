@@ -54,6 +54,43 @@ uv run python -m storyindex.app --db mylibrary.sqlite
 #    /prompts and start an extraction pass under /jobs once Ollama is up.
 ```
 
+## Running and connecting
+
+`storyindex.app` starts Flask's built-in dev server and binds by default to
+`0.0.0.0:8765` — reachable at `http://localhost:8765/` from the same
+machine, and at `http://<this machine's LAN IP>:8765/` from another device
+on your network (e.g. to browse from a phone or another computer). Nothing
+here is meant to be exposed past your own LAN — there's no auth, and this
+is a single-user local tool.
+
+Useful flags:
+
+```bash
+# Custom port, and a name to register this library under in the library
+# switcher (defaults to the filename without .sqlite).
+uv run python -m storyindex.app --db mylibrary.sqlite --port 9000 --library-name my-fic
+
+# Bind only to localhost (refuse LAN connections):
+uv run python -m storyindex.app --db mylibrary.sqlite --host 127.0.0.1
+```
+
+The server runs in the foreground and logs to that terminal — leave the
+terminal open (or run it under `tmux`/`screen`/a background job) while
+you're using the app. Stop it with Ctrl-C; an unclean shutdown (killed
+process, crashed terminal) doesn't corrupt data — any job left mid-run is
+detected as stale and marked "failed" the next time you start the app, with
+whatever it had already committed intact (see `db.reap_stale_jobs`).
+
+If you have more than one library (multiple `--db` files you've launched
+against over time), the nav bar's "library: ..." link switches between
+them without restarting the server — see `/libraries`.
+
+Tagging (extraction/clustering jobs) additionally needs a local
+[Ollama](https://ollama.com) server reachable at the host configured in
+`/settings` (default `http://localhost:11434`) — the in-app `/ollama` page
+shows whether it's running and can launch `ollama serve` for you if the
+CLI is installed. Browsing, search, and manual tagging all work without it.
+
 For an archive with real per-site structure (chaptered stories, an index
 page, a fixed tag vocabulary), write a `SiteAdapter` instead of using the
 generic parser — see `docs/crawler-parser-contract.md` and

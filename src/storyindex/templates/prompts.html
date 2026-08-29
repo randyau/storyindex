@@ -1,21 +1,32 @@
+{% import "_macros.html" as m with context %}
 {% extends "base.html" %}
 {% block title %}prompts — storyindex{% endblock %}
 {% block content %}
 <h2>prompt library</h2>
 <p class="muted">every save creates a new version — old prompts stay around so past jobs stay reproducible.</p>
 
-<h3>write a new prompt</h3>
+<details>
+<summary><h3 style="display:inline">write a new prompt</h3></summary>
 <form method="post" action="{{ url_for('create_prompt') }}">
   <p><input type="text" name="name" placeholder="name (e.g. 'pets tagger v2')" style="width:20rem"></p>
   <p><textarea name="text" rows="10" style="width:100%" placeholder="use {title} {author} {body_text} as placeholders"></textarea></p>
   <input type="submit" value="save as new prompt">
 </form>
+</details>
 
-<h3>saved prompts</h3>
+<h3>saved prompts <span class="muted">({{ total }})</span></h3>
+<form method="get" action="{{ url_for('prompts_list') }}">
+  <input type="text" name="q" value="{{ q }}" placeholder="filter by name" style="width:20rem">
+  <input type="submit" value="filter">
+  {% if q %}<a href="{{ url_for('prompts_list') }}">clear</a>{% endif %}
+</form>
+
 {% for p in prompts %}
 <div class="review-item">
-  <h4>{{ p['name'] }} <span class="muted">#{{ p['id'] }} · {{ p['created_at'] }}</span></h4>
-  <pre style="white-space:pre-wrap">{{ p['text'] }}</pre>
+  <details>
+    <summary>{{ p['name'] }} <span class="muted">#{{ p['id'] }} · {{ p['created_at'] }}</span></summary>
+    <pre style="white-space:pre-wrap">{{ p['text'] }}</pre>
+  </details>
   <form method="post" action="{{ url_for('preview_prompt', prompt_id=p['id']) }}" style="display:inline">
     <label>model: <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:14rem"></label>
     <label>sample size: <input type="number" name="sample_size" value="5" style="width:4rem"></label>
@@ -23,6 +34,8 @@
   </form>
 </div>
 {% else %}
-<p class="muted">no prompts saved yet.</p>
+<p class="muted">{% if q %}no prompts match "{{ q }}".{% else %}no prompts saved yet.{% endif %}</p>
 {% endfor %}
+
+{{ m.pager(page, has_next, 'prompts_list', {'q': q or none}) }}
 {% endblock %}

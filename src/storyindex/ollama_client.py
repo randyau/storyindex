@@ -96,15 +96,24 @@ def start_server() -> None:
     """Launch `ollama serve` as a detached background process. If a server
     is already listening on the port, the new process just fails to bind
     and exits — harmless, so this is safe to call speculatively from a
-    "start" button without checking is_running() first."""
+    "start" button without checking is_running() first.
+    Raises OllamaError if the `ollama` CLI isn't installed/on PATH, instead
+    of letting FileNotFoundError bubble up as an unhandled 500."""
     import subprocess
 
-    subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        raise OllamaError(
+            "the `ollama` CLI isn't installed or isn't on PATH — install it "
+            "from https://ollama.com, or start it yourself and point "
+            "/settings at the right host if it runs elsewhere"
+        ) from exc
 
 
 # Static guidance, not a live catalog — check `ollama pull <name>` works

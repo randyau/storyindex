@@ -36,3 +36,13 @@ def test_ollama_start_calls_start_server(tmp_path, monkeypatch):
     r = client.post("/ollama/start")
     assert r.status_code == 302
     assert calls == [1]
+
+
+def test_ollama_start_shows_error_instead_of_500_when_cli_missing(tmp_path, monkeypatch):
+    def boom():
+        raise ollama_client.OllamaError("the `ollama` CLI isn't installed or isn't on PATH")
+    monkeypatch.setattr(ollama_client, "start_server", boom)
+    client = _client(tmp_path)
+    r = client.post("/ollama/start")
+    assert r.status_code == 200
+    assert "isn&#39;t installed" in r.get_data(as_text=True) or "isn't installed" in r.get_data(as_text=True)

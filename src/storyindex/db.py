@@ -414,11 +414,31 @@ def get_prompt(conn: sqlite3.Connection, prompt_id: int) -> sqlite3.Row | None:
     return row
 
 
-def list_prompts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_prompts(
+    conn: sqlite3.Connection, q: str | None = None, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT * FROM prompts ORDER BY created_at DESC").fetchall()
+    sql = "SELECT * FROM prompts"
+    params: list = []
+    if q:
+        sql += " WHERE name LIKE ?"
+        params.append(f"%{q}%")
+    sql += " ORDER BY created_at DESC"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_prompts(conn: sqlite3.Connection, q: str | None = None) -> int:
+    sql = "SELECT COUNT(*) FROM prompts"
+    params: list = []
+    if q:
+        sql += " WHERE name LIKE ?"
+        params.append(f"%{q}%")
+    return conn.execute(sql, params).fetchone()[0]
 
 
 def random_stories(conn: sqlite3.Connection, n: int) -> list[sqlite3.Row]:
@@ -590,18 +610,47 @@ def list_job_errors(conn: sqlite3.Connection, job_id: int, limit: int = 200) -> 
     return rows
 
 
-def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
+def list_jobs(
+    conn: sqlite3.Connection,
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    type: str | None = None,
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
+    where = []
+    params: list = []
+    if status:
+        where.append("j.status = ?")
+        params.append(status)
+    if type:
+        where.append("j.type = ?")
+        params.append(type)
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT j.*, p.name AS prompt_name FROM jobs j
         LEFT JOIN prompts p ON p.id = j.prompt_id
-        ORDER BY j.created_at DESC LIMIT ?
+        {where_sql}
+        ORDER BY j.created_at DESC LIMIT ? OFFSET ?
         """,
-        (limit,),
+        (*params, limit, offset),
     ).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_jobs(conn: sqlite3.Connection, status: str | None = None, type: str | None = None) -> int:
+    where = []
+    params: list = []
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    if type:
+        where.append("type = ?")
+        params.append(type)
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    return conn.execute(f"SELECT COUNT(*) FROM jobs {where_sql}", params).fetchone()[0]
 
 
 # --- browse / review app --------------------------------------------------

@@ -29,6 +29,43 @@ def test_create_prompt_then_appears_in_list(tmp_path):
     assert "pets tagger" in r.get_data(as_text=True)
 
 
+def test_prompts_list_filters_by_name(tmp_path):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.create_prompt(conn, "pets tagger", "find pets", "2026-01-01T00:00:00Z")
+    db.create_prompt(conn, "sci-fi tagger", "find sci-fi", "2026-01-01T00:00:00Z")
+    conn.commit(); conn.close()
+
+    client = _client(dbpath)
+    r = client.get("/prompts?q=pets")
+    body = r.get_data(as_text=True)
+    assert "pets tagger" in body
+    assert "sci-fi tagger" not in body
+
+
+def test_prompts_list_paginates(tmp_path, monkeypatch):
+    from storyindex import app as app_module
+    monkeypatch.setattr(app_module, "PROMPTS_PAGE_SIZE", 1)
+
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.create_prompt(conn, "first", "text", "2026-01-01T00:00:00Z")
+    db.create_prompt(conn, "second", "text", "2026-01-02T00:00:00Z")
+    conn.commit(); conn.close()
+
+    client = _client(dbpath)
+    r = client.get("/prompts")
+    body = r.get_data(as_text=True)
+    assert "second" in body
+    assert "first" not in body
+    assert "next" in body
+
+    r = client.get("/prompts?page=2")
+    body = r.get_data(as_text=True)
+    assert "first" in body
+    assert "second" not in body
+
+
 def test_preview_prompt_random_sample(tmp_path, make_sig, monkeypatch):
     dbpath = tmp_path / "t.sqlite"
     conn = db.connect(dbpath)
@@ -74,6 +111,26 @@ def test_jobs_list_seeds_and_renders(tmp_path):
     r = client.get("/jobs")
     assert r.status_code == 200
     assert "no jobs yet" in r.get_data(as_text=True)
+
+
+def test_jobs_list_filters_by_status_and_type(tmp_path):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    j1 = db.create_job(conn, "sync", "2026-01-01T00:00:00Z")
+    j2 = db.create_job(conn, "extract", "2026-01-01T00:00:00Z")
+    db.mark_job_done(conn, j2, "2026-01-01T00:01:00Z")
+    conn.commit(); conn.close()
+
+    client = _client(dbpath)
+    r = client.get("/jobs?type=sync")
+    body = r.get_data(as_text=True)
+    assert f">{j1}<" in body
+    assert f">{j2}<" not in body
+
+    r = client.get("/jobs?status=done")
+    body = r.get_data(as_text=True)
+    assert f">{j2}<" in body
+    assert f">{j1}<" not in body
 
 
 def test_create_extract_job_runs_to_completion(tmp_path, make_sig, monkeypatch):

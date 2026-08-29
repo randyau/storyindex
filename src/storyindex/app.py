@@ -577,6 +577,17 @@ def merge_tags():
     return redirect(url_for("tags_admin"))
 
 
+def resolve_startup_db_path(name: str, db_path: Path, libraries_path: Path) -> Path:
+    """Registers/activates `name` -> db_path (first run only - won't clobber
+    an active library chosen in a previous run, e.g. via the /libraries
+    switcher), then returns whichever library ends up active. Keeps the
+    nav's "current library" label truthful about what's actually served,
+    instead of always trusting the just-passed --db."""
+    libraries.ensure_registered_and_active(name, str(db_path.resolve()), libraries_path)
+    data = libraries.load(libraries_path)
+    return Path(data["libraries"][data["active"]])
+
+
 def main() -> None:
     import argparse
 
@@ -587,11 +598,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    app.config["DB_PATH"] = args.db
     name = args.library_name or args.db.stem
-    libraries.ensure_registered_and_active(name, str(args.db.resolve()), _libraries_path())
+    app.config["DB_PATH"] = resolve_startup_db_path(name, args.db, _libraries_path())
 
-    conn = db.connect(args.db)
+    conn = db.connect(app.config["DB_PATH"])
     reaped = db.reap_stale_jobs(conn, _now())
     conn.commit()
     conn.close()

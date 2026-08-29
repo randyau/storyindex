@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}ollama — storyindex{% endblock %}
+{% block content %}
+<h2>local model server</h2>
+
+{% if running %}
+<p style="color:#2a2">● running</p>
+{% else %}
+<p style="color:#a00">● not running</p>
+<form method="post" action="{{ url_for('ollama_start') }}">
+  <button>start ollama</button>
+</form>
+<p class="muted">requires the <code>ollama</code> CLI to be installed and on PATH. if it's already running elsewhere (a different host/port), this page only checks {{ "http://localhost:11434" }}.</p>
+{% endif %}
+
+{% if models %}
+<h3>installed models</h3>
+<ul>
+{% for m in models %}<li>{{ m.get('name', m) }}{% if m.get('size') %} <span class="muted">({{ (m['size'] / 1e9) | round(1) }} GB)</span>{% endif %}</li>{% endfor %}
+</ul>
+{% elif running %}
+<p class="muted">no models installed yet — pull one of the recommendations below.</p>
+{% endif %}
+
+<h3>recommended models</h3>
+<p class="muted">general guidance, not a live catalog — biased toward large context windows since story bodies run long. verify a model still pulls before relying on it.</p>
+<table>
+<tr><th>model</th><th>for</th><th>why</th></tr>
+{% for m in recommended %}
+<tr>
+  <td><code>{{ m['name'] }}</code></td>
+  <td>{{ m['purpose'] }}</td>
+  <td class="muted">{{ m['why'] }}</td>
+</tr>
+{% endfor %}
+</table>
+<p class="muted">pull one with: <code>ollama pull &lt;model name&gt;</code> in a terminal.</p>
+{% endblock %}

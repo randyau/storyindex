@@ -286,6 +286,26 @@ def preview_prompt_on_story(story_id: str):
     return render_template("prompt_preview.html", prompt=prompt, results=results, model=model, target_story=story)
 
 
+@app.route("/ollama")
+def ollama_status():
+    from storyindex import ollama_client
+
+    running = ollama_client.is_running()
+    models = ollama_client.list_models() if running else []
+    return render_template(
+        "ollama.html", running=running, models=models,
+        recommended=ollama_client.RECOMMENDED_MODELS,
+    )
+
+
+@app.route("/ollama/start", methods=["POST"])
+def ollama_start():
+    from storyindex import ollama_client
+
+    ollama_client.start_server()
+    return redirect(url_for("ollama_status"))
+
+
 @app.route("/jobs")
 def jobs_list():
     conn = get_db()

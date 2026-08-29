@@ -70,3 +70,78 @@ def embed(
     if not isinstance(vec, list) or not vec:
         raise OllamaError(f"model did not return an embedding: {resp.text!r}")
     return vec
+
+
+def is_running(host: str = DEFAULT_HOST, timeout: float = 2.0) -> bool:
+    try:
+        requests.get(f"{host}/api/tags", timeout=timeout).raise_for_status()
+        return True
+    except requests.RequestException:
+        return False
+
+
+def list_models(host: str = DEFAULT_HOST, timeout: float = 5.0) -> list[dict]:
+    """Locally-installed models (`ollama list` equivalent). Raises
+    OllamaError if the server isn't reachable — check is_running() first
+    if you want to distinguish "not running" from "running but errored"."""
+    try:
+        resp = requests.get(f"{host}/api/tags", timeout=timeout)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise OllamaError(f"could not list models: {exc}") from exc
+    return resp.json().get("models", [])
+
+
+def start_server() -> None:
+    """Launch `ollama serve` as a detached background process. If a server
+    is already listening on the port, the new process just fails to bind
+    and exits — harmless, so this is safe to call speculatively from a
+    "start" button without checking is_running() first."""
+    import subprocess
+
+    subprocess.Popen(
+        ["ollama", "serve"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+# Static guidance, not a live catalog — check `ollama pull <name>` works
+# before relying on any of these still being current. Skewed toward large
+# context windows since story bodies can run long and get truncated/
+# degraded by a short context model well before hitting any token-count
+# "limit" the extraction prompt itself imposes.
+RECOMMENDED_MODELS = [
+    {
+        "name": "qwen2.5:14b-instruct",
+        "purpose": "extraction (default)",
+        "why": "128k context window, reliable JSON-mode output and instruction "
+               "following; a solid default on a ~16GB-VRAM GPU.",
+    },
+    {
+        "name": "qwen2.5:32b-instruct",
+        "purpose": "extraction (higher quality)",
+        "why": "same 128k-context family, noticeably better judgment on nuanced "
+               "or long stories if you have ~24GB+ VRAM to run it.",
+    },
+    {
+        "name": "llama3.1:8b-instruct",
+        "purpose": "extraction (lighter)",
+        "why": "128k context, much lighter footprint - a reasonable fallback on "
+               "more limited hardware.",
+    },
+    {
+        "name": "mistral-nemo:12b-instruct",
+        "purpose": "extraction (alternative)",
+        "why": "128k context, worth trying if Qwen's tagging style doesn't fit "
+               "your taxonomy well.",
+    },
+    {
+        "name": "nomic-embed-text",
+        "purpose": "clustering / embeddings (required)",
+        "why": "the embedding model the normalization pass uses to cluster "
+               "tag_candidates - install this regardless of which extraction "
+               "model you pick.",
+    },
+]

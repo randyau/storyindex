@@ -1,0 +1,43 @@
+# Crawler output — huge, and the whole point is it never lives in the repo
+archive/
+wget.log
+
+# Site-specific adapters (named site_<label>.py, e.g. site_a.py). These can
+# encode enough of a source site's real markup/structure to fingerprint it,
+# so they stay local, never committed. The reusable framework (base.py,
+# example_adapter.py, scripts/parse_site.py) is safe to commit.
+src/storyindex/adapters/site_*.py
+
+# Story signatures / tag candidates drop folders (generated, not source)
+drop/
+signatures/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (if the local web app UI ends up JS-based)
+node_modules/
+dist/
+build/
+
+# Env / secrets
+.env
+.env.*
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+*.swp

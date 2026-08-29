@@ -1,0 +1,411 @@
+"""SQLite schema and access for the story index.
+
+Kept deliberately minimal for the extraction-pass phase: stories and
+tag_candidates are populated by the classifier. tags / story_tags are
+defined now so the normalization + human-review pass (built next) has
+somewhere to land without a schema migration.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS stories (
+    id              TEXT PRIMARY KEY,
+    group_id        TEXT NOT NULL,
+    part_index      INTEGER NOT NULL,
+    title           TEXT NOT NULL,
+    author          TEXT NOT NULL,
+    body_text       TEXT NOT NULL,
+    source_relpath  TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    ingested_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_group ON stories(group_id);
+
+CREATE TABLE IF NOT EXISTS tag_candidates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    story_id        TEXT NOT NULL REFERENCES stories(id),
+    tag_text        TEXT NOT NULL,
+    prompt_version  TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'candidate'
+        CHECK (status IN ('candidate', 'clustered', 'approved', 'rejected'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_candidates_story ON tag_candidates(story_id);
+CREATE INDEX IF NOT EXISTS idx_tag_candidates_status ON tag_candidates(status);
+
+-- Canonical tag vocabulary. Populated by the normalization pass, not the
+-- extraction pass.
+CREATE TABLE IF NOT EXISTS tags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS story_tags (
+    story_id    TEXT NOT NULL REFERENCES stories(id),
+    tag_id      INTEGER NOT NULL REFERENCES tags(id),
+    confidence  REAL,
+    source      TEXT NOT NULL CHECK (source IN ('model', 'human')),
+    PRIMARY KEY (story_id, tag_id)
+);
+
+-- Site-provided tags: a separate storage system from tags/story_tags above.
+-- Populated straight from StorySignature.tags at ingest time, treated as
+-- read-only in the UI. See docs/crawler-parser-contract.md section 3a.
+CREATE TABLE IF NOT EXISTS site_tags (
+    code        TEXT PRIMARY KEY,
+    label       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS story_site_tags (
+    story_id    TEXT NOT NULL REFERENCES stories(id),
+    code        TEXT NOT NULL REFERENCES site_tags(code),
+    PRIMARY KEY (story_id, code)
+);
+"""
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def upsert_story(conn: sqlite3.Connection, sig) -> None:
+    conn.execute(
+        """
+        INSERT INTO stories
+            (id, group_id, part_index, title, author, body_text,
+             source_relpath, content_hash, ingested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            group_id=excluded.group_id,
+            part_index=excluded.part_index,
+            title=excluded.title,
+            author=excluded.author,
+            body_text=excluded.body_text,
+            source_relpath=excluded.source_relpath,
+            content_hash=excluded.content_hash,
+            ingested_at=excluded.ingested_at
+        """,
+        (
+            sig.id,
+            sig.group_id,
+            sig.part_index,
+            sig.title,
+            sig.author,
+            sig.body_text,
+            sig.source_relpath,
+            sig.content_hash,
+            sig.ingested_at,
+        ),
+    )
+    for code in getattr(sig, "tags", ()):
+        upsert_site_tag(conn, code)
+        link_story_site_tag(conn, sig.id, code)
+
+
+def has_candidates(conn: sqlite3.Connection, story_id: str, prompt_version: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM tag_candidates WHERE story_id = ? AND prompt_version = ? LIMIT 1",
+        (story_id, prompt_version),
+    ).fetchone()
+    return row is not None
+
+
+def insert_candidates(
+    conn: sqlite3.Connection,
+    story_id: str,
+    tags: list[str],
+    prompt_version: str,
+    model: str,
+    created_at: str,
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO tag_candidates (story_id, tag_text, prompt_version, model, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [(story_id, tag, prompt_version, model, created_at) for tag in tags],
+    )
+
+
+# --- normalization / clustering pass -------------------------------------
+
+def pending_candidate_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """All tag_candidates rows still in status='candidate', i.e. not yet
+    folded into the canonical tags table by the clustering pass."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, story_id, tag_text FROM tag_candidates WHERE status = 'candidate'"
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def get_or_create_tag(conn: sqlite3.Connection, name: str, created_at: str) -> int:
+    row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+    if row is not None:
+        return row[0]
+    cur = conn.execute(
+        "INSERT INTO tags (name, description, created_at) VALUES (?, NULL, ?)",
+        (name, created_at),
+    )
+    return cur.lastrowid
+
+
+def link_story_tag(
+    conn: sqlite3.Connection,
+    story_id: str,
+    tag_id: int,
+    source: str,
+    confidence: float | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO story_tags (story_id, tag_id, confidence, source)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(story_id, tag_id) DO NOTHING
+        """,
+        (story_id, tag_id, confidence, source),
+    )
+
+
+def mark_candidate_clustered(conn: sqlite3.Connection, candidate_id: int) -> None:
+    conn.execute(
+        "UPDATE tag_candidates SET status = 'clustered' WHERE id = ?",
+        (candidate_id,),
+    )
+
+
+# --- site-provided tags (separate storage system, read-only in the UI) ---
+
+def upsert_site_tag(conn: sqlite3.Connection, code: str, label: str | None = None) -> None:
+    """Create the site_tag if missing. If a real label is given, it always
+    wins over a previously auto-filled (code-as-label) placeholder."""
+    conn.execute(
+        """
+        INSERT INTO site_tags (code, label) VALUES (?, ?)
+        ON CONFLICT(code) DO UPDATE SET label = excluded.label
+            WHERE excluded.label != site_tags.code OR site_tags.label = site_tags.code
+        """,
+        (code, label or code),
+    )
+
+
+def link_story_site_tag(conn: sqlite3.Connection, story_id: str, code: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO story_site_tags (story_id, code) VALUES (?, ?)
+        ON CONFLICT(story_id, code) DO NOTHING
+        """,
+        (story_id, code),
+    )
+
+
+def load_site_tag_vocab(conn: sqlite3.Connection, vocab: dict[str, str]) -> None:
+    """Backfill human-readable labels for site_tags from a code -> label
+    vocabulary (e.g. parsed once from a source site's own category index)."""
+    for code, label in vocab.items():
+        upsert_site_tag(conn, code, label)
+
+
+def site_tags_for_story(conn: sqlite3.Connection, story_id: str) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT st.code, t.label
+        FROM story_site_tags st
+        JOIN site_tags t ON t.code = st.code
+        WHERE st.story_id = ?
+        ORDER BY t.label ASC
+        """,
+        (story_id,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def list_site_tags_with_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT t.code, t.label, COUNT(st.story_id) AS story_count
+        FROM site_tags t
+        LEFT JOIN story_site_tags st ON st.code = t.code
+        GROUP BY t.code
+        ORDER BY story_count DESC, t.label ASC
+        """
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def get_site_tag(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT code, label FROM site_tags WHERE code = ?", (code,)).fetchone()
+    conn.row_factory = None
+    return row
+
+
+def stories_for_site_tag(conn: sqlite3.Connection, code: str) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT s.id, s.group_id, s.part_index, s.title, s.author
+        FROM stories s
+        JOIN story_site_tags st ON st.story_id = s.id
+        WHERE st.code = ?
+        ORDER BY s.title ASC, s.part_index ASC
+        """,
+        (code,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+# --- browse / review app --------------------------------------------------
+
+def list_tags_with_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT t.id, t.name, COUNT(st.story_id) AS story_count
+        FROM tags t
+        LEFT JOIN story_tags st ON st.tag_id = t.id
+        GROUP BY t.id
+        ORDER BY story_count DESC, t.name ASC
+        """
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def stories_for_tag(conn: sqlite3.Connection, tag_id: int) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT s.id, s.group_id, s.part_index, s.title, s.author
+        FROM stories s
+        JOIN story_tags st ON st.story_id = s.id
+        WHERE st.tag_id = ?
+        ORDER BY s.title ASC, s.part_index ASC
+        """,
+        (tag_id,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def get_tag(conn: sqlite3.Connection, tag_id: int) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT id, name FROM tags WHERE id = ?", (tag_id,)).fetchone()
+    conn.row_factory = None
+    return row
+
+
+def get_story(conn: sqlite3.Connection, story_id: str) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,)).fetchone()
+    conn.row_factory = None
+    return row
+
+
+def get_group_parts(conn: sqlite3.Connection, group_id: str) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, part_index, title FROM stories WHERE group_id = ? ORDER BY part_index ASC",
+        (group_id,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def tags_for_story(conn: sqlite3.Connection, story_id: str) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT t.id, t.name, st.source, st.confidence
+        FROM tags t
+        JOIN story_tags st ON st.tag_id = t.id
+        WHERE st.story_id = ?
+        ORDER BY t.name ASC
+        """,
+        (story_id,),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def search_stories(conn: sqlite3.Connection, query: str, limit: int = 100) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    like = f"%{query}%"
+    rows = conn.execute(
+        """
+        SELECT id, group_id, part_index, title, author
+        FROM stories
+        WHERE title LIKE ? OR author LIKE ?
+        ORDER BY title ASC
+        LIMIT ?
+        """,
+        (like, like, limit),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def list_stories(conn: sqlite3.Connection, limit: int = 100, offset: int = 0) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, group_id, part_index, title, author FROM stories "
+        "ORDER BY title ASC LIMIT ? OFFSET ?",
+        (limit, offset),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> None:
+    conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
+
+
+def merge_tags(conn: sqlite3.Connection, src_tag_id: int, dst_tag_id: int) -> None:
+    """Repoint every story_tags row from src to dst, then drop src."""
+    conn.execute(
+        """
+        UPDATE OR IGNORE story_tags SET tag_id = ? WHERE tag_id = ?
+        """,
+        (dst_tag_id, src_tag_id),
+    )
+    conn.execute("DELETE FROM story_tags WHERE tag_id = ?", (src_tag_id,))
+    conn.execute("DELETE FROM tags WHERE id = ?", (src_tag_id,))
+
+
+def delete_story_tag(conn: sqlite3.Connection, story_id: str, tag_id: int) -> None:
+    conn.execute(
+        "DELETE FROM story_tags WHERE story_id = ? AND tag_id = ?",
+        (story_id, tag_id),
+    )
+
+
+def set_story_tag_source(conn: sqlite3.Connection, story_id: str, tag_id: int, source: str) -> None:
+    conn.execute(
+        "UPDATE story_tags SET source = ? WHERE story_id = ? AND tag_id = ?",
+        (source, story_id, tag_id),
+    )
+
+
+def add_story_tag_by_name(
+    conn: sqlite3.Connection, story_id: str, tag_name: str, created_at: str, source: str = "human"
+) -> None:
+    tag_id = get_or_create_tag(conn, tag_name, created_at)
+    link_story_tag(conn, story_id, tag_id, source=source)

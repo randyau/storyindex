@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ story['title'] }} — storyindex{% endblock %}
+{% block content %}
+<h2>{{ story['title'] }}</h2>
+<p class="muted">by {{ story['author'] }}</p>
+
+{% if parts|length > 1 %}
+<p class="muted">parts:
+{% for p in parts %}
+  {% if p['id'] == story['id'] %}<strong>{{ p['part_index'] + 1 }}</strong>{% else %}<a href="{{ url_for('story_detail', story_id=p['id']) }}">{{ p['part_index'] + 1 }}</a>{% endif %}
+{% endfor %}
+</p>
+{% endif %}
+
+<h3>tags</h3>
+<p>
+{% for st in site_tags %}
+  <span class="tag-pill">
+    <a href="{{ url_for('site_tag_detail', code=st['code']) }}">{{ st['label'] }}</a>
+  </span>
+{% endfor %}
+{% for t in tags %}
+  <span class="tag-pill">
+    <a href="{{ url_for('tag_detail', tag_id=t['id']) }}">{{ t['name'] }}</a>
+    {% if t['source'] == 'model' %}
+    <form method="post" action="{{ url_for('approve_tag', story_id=story['id'], tag_id=t['id']) }}"><button title="confirm">✓</button></form>
+    {% endif %}
+    <form method="post" action="{{ url_for('delete_tag', story_id=story['id'], tag_id=t['id']) }}"><button title="remove">✕</button></form>
+  </span>
+{% else %}
+  {% if not site_tags %}<span class="muted">no tags yet.</span>{% endif %}
+{% endfor %}
+</p>
+<form method="post" action="{{ url_for('add_tag', story_id=story['id']) }}">
+  <input type="text" name="name" placeholder="add tag...">
+  <input type="submit" value="add">
+</form>
+
+<div class="story-body">{{ story['body_text'] }}</div>
+{% endblock %}

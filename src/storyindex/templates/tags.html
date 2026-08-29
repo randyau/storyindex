@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}manage tags — storyindex{% endblock %}
+{% block content %}
+<h2>site tags</h2>
+<p class="muted">provided by the source archive itself — read-only here, not mergeable/renameable.</p>
+<table>
+<tr><th>label</th><th>code</th><th>stories</th></tr>
+{% for st in site_tags %}
+<tr>
+  <td><a href="{{ url_for('site_tag_detail', code=st['code']) }}">{{ st['label'] }}</a></td>
+  <td class="muted">{{ st['code'] }}</td>
+  <td>{{ st['story_count'] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="3" class="muted">no site tags yet.</td></tr>
+{% endfor %}
+</table>
+
+<h2>manage tags</h2>
+<table>
+<tr><th>name</th><th>stories</th><th>rename</th></tr>
+{% for t in tags %}
+<tr>
+  <td><a href="{{ url_for('tag_detail', tag_id=t['id']) }}">{{ t['name'] }}</a></td>
+  <td>{{ t['story_count'] }}</td>
+  <td>
+    <form method="post" action="{{ url_for('rename_tag', tag_id=t['id']) }}" style="display:inline">
+      <input type="text" name="name" placeholder="new name" value="{{ t['name'] }}" style="width:12rem">
+      <input type="submit" value="rename">
+    </form>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="3" class="muted">no tags yet.</td></tr>
+{% endfor %}
+</table>
+
+<h3>merge tags</h3>
+<p class="muted">move all stories from one tag into another, then delete the source tag.</p>
+<form method="post" action="{{ url_for('merge_tags') }}">
+  <label>from (id): <input type="number" name="src_id"></label>
+  <label>into (id): <input type="number" name="dst_id"></label>
+  <input type="submit" value="merge">
+</form>
+{% endblock %}

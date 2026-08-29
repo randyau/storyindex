@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{% block title %}storyindex{% endblock %}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  a { color: #1a5fb4; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  nav { margin-bottom: 1.5rem; }
+  nav a { margin-right: 1rem; font-weight: 600; }
+  .tag-pill { display: inline-block; background: #eef2f7; border-radius: 999px; padding: 0.15rem 0.7rem; margin: 0.15rem; font-size: 0.85rem; }
+  .tag-pill form { display: inline; }
+  .tag-pill button { border: none; background: none; color: #a00; cursor: pointer; margin-left: 0.3rem; }
+  .story-list li { margin-bottom: 0.4rem; }
+  .story-body { white-space: pre-wrap; line-height: 1.5; margin-top: 1.5rem; }
+  input[type=text] { padding: 0.4rem; width: 60%; }
+  button, input[type=submit] { padding: 0.4rem 0.8rem; cursor: pointer; }
+  .muted { color: #777; font-size: 0.9rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="{{ url_for('index') }}">browse</a>
+  <a href="{{ url_for('tags_admin') }}">manage tags</a>
+</nav>
+{% block content %}{% endblock %}
+</body>
+</html>

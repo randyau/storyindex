@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}browse — storyindex{% endblock %}
+{% block content %}
+<form method="get" action="{{ url_for('index') }}">
+  <input type="text" name="q" placeholder="search title or author..." value="{{ q }}">
+  <input type="submit" value="search">
+</form>
+
+<h2>tags</h2>
+<p>
+{% for tag in tags %}
+  {% if tag['kind'] == 'site' %}
+  <a class="tag-pill" href="{{ url_for('site_tag_detail', code=tag['code']) }}">{{ tag['label'] }} ({{ tag['count'] }})</a>
+  {% else %}
+  <a class="tag-pill" href="{{ url_for('tag_detail', tag_id=tag['id']) }}">{{ tag['label'] }} ({{ tag['count'] }})</a>
+  {% endif %}
+{% else %}
+  <span class="muted">no tags yet — run the extraction + clustering passes first.</span>
+{% endfor %}
+</p>
+
+<h2>{% if q %}results for "{{ q }}"{% else %}stories{% endif %}</h2>
+<ul class="story-list">
+{% for s in stories %}
+  <li><a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a> <span class="muted">by {{ s['author'] }}{% if s['part_index'] > 0 %}, part {{ s['part_index'] + 1 }}{% endif %}</span></li>
+{% else %}
+  <li class="muted">no stories.</li>
+{% endfor %}
+</ul>
+{% endblock %}

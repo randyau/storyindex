@@ -202,7 +202,15 @@ def _call_extract(adapter, text: str, relpath: str):
     return adapter.extract(text)
 
 
-SYNC_COMMIT_EVERY = 200
+# 200 seemed harmless (sync's own per-item work is just disk I/O + regex,
+# no slow model call like extract's), but a batch of 200 upserts - each
+# rewriting a full body_text blob and its FTS index entry - held the WAL
+# writer lock long enough that two concurrently-running extract jobs both
+# hit "database is locked" past their 5s busy_timeout and crashed mid-run
+# (observed running all three job types at once against the full library).
+# Same fix as EXTRACT_COMMIT_EVERY: commit often enough that the lock is
+# never held for more than one item's worth of work.
+SYNC_COMMIT_EVERY = 20
 
 
 def run_sync_job(db_path: Path, job_id: int) -> None:

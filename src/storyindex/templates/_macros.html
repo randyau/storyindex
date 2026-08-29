@@ -3,15 +3,20 @@
      {% import "_macros.html" as m with context %}
 #}
 
+{# Each row represents a whole story (one entry even for a many-chapter
+   work - see search_stories' docstring in db.py), so "part N" doesn't
+   apply here; part_count, when present and >1, shows how many chapters
+   the linked story has instead. #}
 {% macro story_list(stories, show_author=True, show_snippet=False, empty_message='no stories.') %}
 <ul class="story-list">
 {% for s in stories %}
   <li>
     <a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a>
+    {% set parts = s['part_count'] if s['part_count'] is defined else none %}
     {% if show_author %}
-    <span class="muted">by {{ s['author'] }}{% if s['part_index'] > 0 %}, part {{ s['part_index'] + 1 }}{% endif %}</span>
-    {% elif s['part_index'] > 0 %}
-    <span class="muted">part {{ s['part_index'] + 1 }}</span>
+    <span class="muted">by {{ s['author'] }}{% if parts and parts > 1 %}, {{ parts }} parts{% endif %}</span>
+    {% elif parts and parts > 1 %}
+    <span class="muted">{{ parts }} parts</span>
     {% endif %}
     {% if show_snippet and s['snippet'] is defined and s['snippet'] %}<div class="snippet">{{ s['snippet']|safe }}</div>{% endif %}
   </li>

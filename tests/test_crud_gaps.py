@@ -22,7 +22,7 @@ def test_create_manual_story(conn):
     assert story["group_id"] == "manual-1"
 
 
-def test_stories_for_author_includes_all_parts(conn, make_sig):
+def test_stories_for_author_groups_multipart_story_into_one_row(conn, make_sig):
     sig1 = make_sig("s1", title="Part 1", author="Jane")
     db.upsert_story(conn, sig1)
     sig2 = make_sig("s2", title="Part 2", author="Jane")
@@ -34,7 +34,8 @@ def test_stories_for_author_includes_all_parts(conn, make_sig):
     conn.commit()
 
     results = db.stories_for_author(conn, "Jane")
-    assert [r["title"] for r in results] == ["Part 1", "Part 2"]
+    assert [r["title"] for r in results] == ["Part 1"]
+    assert results[0]["part_count"] == 2
 
 
 def test_delete_tag_removes_links_but_keeps_story(conn, make_sig):

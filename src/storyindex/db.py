@@ -182,6 +182,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # status. On a multi-GB library that's tens of seconds instead of
     # milliseconds; this index turns it into an index seek.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_stories_status_title ON stories(status, title)")
+    # Covers the `reps` CTE that every story-listing query (browse, tag,
+    # site-tag, author pages) uses to group multi-part stories into one
+    # row: GROUP BY group_id / MIN(part_index) / COUNT(*), filtered by
+    # status. Without group_id and part_index in the index, that grouped
+    # scan has to bounce back to the main table for every one of tens of
+    # thousands of rows just to read those two columns - each bounce reads
+    # a whole row including its (often large) body_text, which on a
+    # multi-GB library turned an instant page into many seconds even
+    # warm-cache, and much worse cold.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_stories_status_group_part "
+        "ON stories(status, group_id, part_index)"
+    )
 
 
 def _ensure_fts(conn: sqlite3.Connection) -> None:
@@ -208,7 +221,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous = NORMAL")
     # A job subprocess and the Flask reader can briefly contend for the
     # single WAL writer slot; wait instead of raising "database is locked".
-    conn.execute("PRAGMA busy_timeout = 5000")
+    # Seen in practice with three job subprocesses running at once (two
+    # extract jobs + a sync job): 5s wasn't always enough margin even
+    # after tightening each job's own commit batching, so this errs
+    # generous - a real deadlock/hang would still show up as a slow
+    # request, not a silent wait forever.
+    conn.execute("PRAGMA busy_timeout = 15000")
     conn.executescript(SCHEMA)
     _migrate(conn)
     _ensure_fts(conn)
@@ -414,13 +432,21 @@ def get_site_tag(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None:
 def stories_for_site_tag(
     conn: sqlite3.Connection, code: str, limit: int | None = None, offset: int = 0
 ) -> list[sqlite3.Row]:
+    """One row per story - see stories_for_tag's docstring."""
     conn.row_factory = sqlite3.Row
-    sql = """
-        SELECT s.id, s.group_id, s.part_index, s.title, s.author
-        FROM stories s
-        JOIN story_site_tags st ON st.story_id = s.id
-        WHERE st.code = ?
-        ORDER BY s.title ASC, s.part_index ASC
+    sql = f"""
+        WITH {_REPS_CTE}
+        SELECT s.id, s.group_id, s.part_index, {_TITLE_EXPR} AS title, s.author,
+               reps.part_count AS part_count
+        FROM reps
+        {_REPS_JOIN}
+        LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
+        WHERE s.group_id IN (
+              SELECT p.group_id FROM stories p
+              JOIN story_site_tags st ON st.story_id = p.id
+              WHERE st.code = ? AND p.status = 'active'
+          )
+        ORDER BY {_SORT_KEY_EXPR} ASC
     """
     params: list = [code]
     if limit is not None:
@@ -433,7 +459,12 @@ def stories_for_site_tag(
 
 def count_stories_for_site_tag(conn: sqlite3.Connection, code: str) -> int:
     return conn.execute(
-        "SELECT COUNT(*) FROM story_site_tags WHERE code = ?", (code,)
+        """
+        SELECT COUNT(DISTINCT p.group_id) FROM stories p
+        JOIN story_site_tags st ON st.story_id = p.id
+        WHERE st.code = ? AND p.status = 'active'
+        """,
+        (code,),
     ).fetchone()[0]
 
 
@@ -758,13 +789,24 @@ def count_tags(conn: sqlite3.Connection, q: str | None = None) -> int:
 def stories_for_tag(
     conn: sqlite3.Connection, tag_id: int, limit: int | None = None, offset: int = 0
 ) -> list[sqlite3.Row]:
+    """One row per story (see search_stories' docstring for why): a tag
+    attached to any one chapter of a multi-part story still surfaces that
+    whole story here, via its earliest active part, rather than listing
+    just the specific chapter that happened to carry the tag."""
     conn.row_factory = sqlite3.Row
-    sql = """
-        SELECT s.id, s.group_id, s.part_index, s.title, s.author
-        FROM stories s
-        JOIN story_tags st ON st.story_id = s.id
-        WHERE st.tag_id = ?
-        ORDER BY s.title ASC, s.part_index ASC
+    sql = f"""
+        WITH {_REPS_CTE}
+        SELECT s.id, s.group_id, s.part_index, {_TITLE_EXPR} AS title, s.author,
+               reps.part_count AS part_count
+        FROM reps
+        {_REPS_JOIN}
+        LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
+        WHERE s.group_id IN (
+              SELECT p.group_id FROM stories p
+              JOIN story_tags st ON st.story_id = p.id
+              WHERE st.tag_id = ? AND p.status = 'active'
+          )
+        ORDER BY {_SORT_KEY_EXPR} ASC
     """
     params: list = [tag_id]
     if limit is not None:
@@ -777,7 +819,12 @@ def stories_for_tag(
 
 def count_stories_for_tag(conn: sqlite3.Connection, tag_id: int) -> int:
     return conn.execute(
-        "SELECT COUNT(*) FROM story_tags WHERE tag_id = ?", (tag_id,)
+        """
+        SELECT COUNT(DISTINCT p.group_id) FROM stories p
+        JOIN story_tags st ON st.story_id = p.id
+        WHERE st.tag_id = ? AND p.status = 'active'
+        """,
+        (tag_id,),
     ).fetchone()[0]
 
 
@@ -896,6 +943,42 @@ def search_stories_fts(
     return results
 
 
+# Shared building blocks for "one listing row per story, not per chapter
+# file" - every story-listing query (browse, tag pages, site-tag pages)
+# joins `stories s` against `stories g` (g = that story's part 0, for the
+# title fallback) and picks the row where s is that group's earliest
+# active part, so these three expressions can be reused verbatim rather
+# than re-deriving the same COALESCE/CASE/subquery three times.
+_TITLE_EXPR = "COALESCE(NULLIF(TRIM(s.title), ''), NULLIF(TRIM(g.title), ''), '(untitled)')"
+_SORT_KEY_EXPR = f"""CASE
+    WHEN {_TITLE_EXPR} LIKE 'a _%' THEN LTRIM(substr({_TITLE_EXPR}, 3))
+    WHEN {_TITLE_EXPR} LIKE 'an _%' THEN LTRIM(substr({_TITLE_EXPR}, 4))
+    WHEN {_TITLE_EXPR} LIKE 'the _%' THEN LTRIM(substr({_TITLE_EXPR}, 5))
+    ELSE {_TITLE_EXPR}
+END"""
+# A correlated subquery version of "is this row the group's earliest active
+# part" + "how many active parts does this group have" looks natural, but
+# it re-runs once per candidate row *before* ORDER BY/LIMIT can narrow
+# anything down (SQLite can't push the LIMIT past a sort on a computed
+# expression) - fine as raw cost at 44k rows uncontended (tens of ms), but
+# under real concurrent write load (three job subprocesses hammering the
+# same file) each of those ~90k extra random index probes picks up enough
+# lock/IO contention overhead to turn an instant browse page into a
+# multi-minute hang. `reps` computes both numbers for every group in one
+# sequential grouped scan instead, which is what actually kept this fast
+# under load in testing (250s+ -> under a second per page).
+_REPS_CTE = """
+    reps AS (
+        SELECT group_id, MIN(part_index) AS part_index, COUNT(*) AS part_count
+        FROM stories WHERE status = 'active' GROUP BY group_id
+    )
+"""
+_REPS_JOIN = (
+    "JOIN stories s ON s.group_id = reps.group_id AND s.part_index = reps.part_index "
+    "AND s.status = 'active'"
+)
+
+
 def search_stories(
     conn: sqlite3.Connection,
     query: str = "",
@@ -910,6 +993,20 @@ def search_stories(
     holmes". Superset of search_stories_fts/list_stories; those stay as
     simpler standalone helpers since they're independently useful/tested.
 
+    One row per *story* (group_id), not per chapter file: a multi-part
+    story used to show up as N separate, independent-looking listing rows,
+    which both cluttered browse and made a many-chapter story impossible
+    to spot as a single work. The representative row is always the
+    earliest part (min part_index) - the one chapter_nav on the story page
+    starts a reader on anyway - annotated with part_count so the listing
+    shows "12 parts" rather than pretending it's a one-off short story.
+    Tags stay attached per-part (finer-grained search/curation), but a tag
+    filter matches the *story*: a group qualifies for an include filter if
+    any of its parts carry that tag, and is excluded if any part carries
+    an excluded tag - the union-of-parts semantics a reader actually wants
+    ("does this story have this element anywhere"), not "does chapter 7
+    specifically have it".
+
     Some multi-chapter stories only carry a title on their first part's
     page (later chapter pages don't repeat it), leaving s.title blank for
     every part after that - blank both looks broken (an empty link) and,
@@ -920,35 +1017,72 @@ def search_stories(
     include_tag_ids = include_tag_ids or []
     exclude_tag_ids = exclude_tag_ids or []
     params: list = []
-    title_expr = "COALESCE(NULLIF(TRIM(s.title), ''), NULLIF(TRIM(g.title), ''), '(untitled)')"
+    title_expr = _TITLE_EXPR
+    sort_key_expr = _SORT_KEY_EXPR
+    # Only used in the keyword-search branch below, where the candidate
+    # set is already narrowed by an FTS match (never the full table), so a
+    # correlated subquery per matched row is cheap - unlike the no-query
+    # branch, which uses the `reps` CTE instead precisely to avoid that
+    # per-row cost across all ~44k stories.
+    part_count_expr = (
+        "(SELECT COUNT(*) FROM stories p WHERE p.group_id = s.group_id AND p.status = 'active')"
+    )
 
     if query.strip():
         terms = query.split()
         match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
+        # One matching row per group_id (the best-ranked part). Two CTEs,
+        # not one: FTS5's snippet()/rank must be evaluated in a query that
+        # directly matches the virtual table with no window function
+        # present in that same SELECT ("unable to use function snippet in
+        # the requested context") - so extract them to plain columns in
+        # `raw` first, then rank/dedupe by group in a second pass over
+        # `raw` where no FTS5 machinery is involved anymore.
         sql = f"""
+            WITH raw AS (
+                SELECT s.id, s.group_id, s.part_index, s.title, s.author, rank AS r,
+                       snippet(stories_fts, 2, '\x01', '\x02', '…', 12) AS snippet
+                FROM stories_fts
+                JOIN stories s ON s.rowid = stories_fts.rowid
+                WHERE stories_fts MATCH ? AND s.status = 'active'
+            ), matched AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY r) AS rn
+                FROM raw
+            )
             SELECT s.id, s.group_id, s.part_index, {title_expr} AS title, s.author,
-                   snippet(stories_fts, 2, '\x01', '\x02', '…', 12) AS snippet
-            FROM stories_fts
-            JOIN stories s ON s.rowid = stories_fts.rowid
+                   s.snippet AS snippet, {part_count_expr} AS part_count
+            FROM matched s
             LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
-            WHERE stories_fts MATCH ? AND s.status = 'active'
+            WHERE s.rn = 1
         """
         params.append(match_expr)
-        order_by = "ORDER BY rank"
+        order_by = "ORDER BY s.r"
     else:
-        sql = (
-            f"SELECT s.id, s.group_id, s.part_index, {title_expr} AS title, s.author, NULL AS snippet "
-            "FROM stories s LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0 "
-            "WHERE s.status = 'active'"
-        )
-        order_by = f"ORDER BY {title_expr} ASC"
+        sql = f"""
+            WITH {_REPS_CTE}
+            SELECT s.id, s.group_id, s.part_index, {title_expr} AS title, s.author,
+                   NULL AS snippet, reps.part_count AS part_count
+            FROM reps
+            {_REPS_JOIN}
+            LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
+            WHERE 1 = 1
+        """
+        order_by = f"ORDER BY {sort_key_expr} ASC"
 
     for tag_id in include_tag_ids:
-        sql += " AND s.id IN (SELECT story_id FROM story_tags WHERE tag_id = ?)"
+        sql += (
+            " AND s.group_id IN (SELECT p.group_id FROM stories p "
+            "JOIN story_tags st ON st.story_id = p.id "
+            "WHERE st.tag_id = ? AND p.status = 'active')"
+        )
         params.append(tag_id)
     if exclude_tag_ids:
         placeholders = ",".join("?" for _ in exclude_tag_ids)
-        sql += f" AND s.id NOT IN (SELECT story_id FROM story_tags WHERE tag_id IN ({placeholders}))"
+        sql += (
+            " AND s.group_id NOT IN (SELECT p.group_id FROM stories p "
+            "JOIN story_tags st ON st.story_id = p.id "
+            f"WHERE st.tag_id IN ({placeholders}) AND p.status = 'active')"
+        )
         params.extend(exclude_tag_ids)
 
     sql += f" {order_by} LIMIT ? OFFSET ?"
@@ -1047,14 +1181,19 @@ def _sha1(text: str) -> str:
 def stories_for_author(
     conn: sqlite3.Connection, author: str, limit: int | None = None, offset: int = 0
 ) -> list[sqlite3.Row]:
-    """Every story/part by this exact author name, for a dedicated browse
-    page (unlike stories_by_author, this doesn't exclude any group)."""
+    """One row per story by this exact author name (unlike stories_by_author,
+    this doesn't exclude any group) - see stories_for_tag's docstring for
+    why a multi-part story is one row here, not N."""
     conn.row_factory = sqlite3.Row
-    sql = """
-        SELECT id, group_id, part_index, title, author
-        FROM stories
-        WHERE author = ? AND status = 'active'
-        ORDER BY title ASC, part_index ASC
+    sql = f"""
+        WITH {_REPS_CTE}
+        SELECT s.id, s.group_id, s.part_index, {_TITLE_EXPR} AS title, s.author,
+               reps.part_count AS part_count
+        FROM reps
+        {_REPS_JOIN}
+        LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
+        WHERE s.author = ?
+        ORDER BY {_SORT_KEY_EXPR} ASC
     """
     params: list = [author]
     if limit is not None:
@@ -1067,7 +1206,8 @@ def stories_for_author(
 
 def count_stories_for_author(conn: sqlite3.Connection, author: str) -> int:
     return conn.execute(
-        "SELECT COUNT(*) FROM stories WHERE author = ? AND status = 'active'", (author,)
+        "SELECT COUNT(DISTINCT group_id) FROM stories WHERE author = ? AND status = 'active'",
+        (author,),
     ).fetchone()[0]
 
 

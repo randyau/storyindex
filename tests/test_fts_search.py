@@ -117,5 +117,74 @@ def test_search_stories_falls_back_to_part_zero_title(conn, make_sig):
     conn.commit()
 
     results = db.search_stories(conn)
+    assert len(results) == 1
+    assert results[0]["id"] == "g1"
+    assert results[0]["title"] == "The Long Saga"
+
+
+def test_search_stories_groups_multipart_story_into_one_row(conn, make_sig):
+    for i in range(3):
+        p = make_sig(f"g1-{i}", title="Saga" if i == 0 else "")
+        p.group_id = "g1"
+        p.part_index = i
+        db.upsert_story(conn, p)
+    db.upsert_story(conn, make_sig("s2", title="Other"))
+    conn.commit()
+
+    results = db.search_stories(conn)
+    ids = [r["id"] for r in results]
+    assert ids.count("g1-0") == 1
+    assert "g1-1" not in ids and "g1-2" not in ids
     by_id = {r["id"]: r for r in results}
-    assert by_id["g1-p2"]["title"] == "The Long Saga"
+    assert by_id["g1-0"]["part_count"] == 3
+    assert by_id["s2"]["part_count"] == 1
+
+
+def test_search_stories_tag_filter_matches_if_any_part_has_it(conn, make_sig):
+    # Tags are attached per-part, but a filter should match the whole
+    # story: a tag on chapter 2 alone must still surface the story (via
+    # its representative row) under an include filter, and exclude it
+    # under an exclude filter - "does this story have this element
+    # anywhere", not "does this specific chapter".
+    for i in range(2):
+        p = make_sig(f"g1-{i}", title="Saga" if i == 0 else "")
+        p.group_id = "g1"
+        p.part_index = i
+        db.upsert_story(conn, p)
+    conn.commit()
+    now = "2026-01-01T00:00:00Z"
+    tag_id = db.get_or_create_tag(conn, "twist", now)
+    db.link_story_tag(conn, "g1-1", tag_id, source="human")
+    conn.commit()
+
+    included = db.search_stories(conn, include_tag_ids=[tag_id])
+    assert [r["id"] for r in included] == ["g1-0"]
+
+    excluded = db.search_stories(conn, exclude_tag_ids=[tag_id])
+    assert excluded == []
+
+
+def test_search_stories_sorts_ignoring_leading_article(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1", title="The Zebra"))
+    db.upsert_story(conn, make_sig("s2", title="An Apple"))
+    db.upsert_story(conn, make_sig("s3", title="A Banana"))
+    db.upsert_story(conn, make_sig("s4", title="Circus"))
+    conn.commit()
+
+    results = db.search_stories(conn)
+    # displayed titles keep their article; sort order goes by Apple, Banana,
+    # Circus, Zebra - not by the leading A/An/The.
+    assert [r["title"] for r in results] == ["An Apple", "A Banana", "Circus", "The Zebra"]
+
+
+def test_search_stories_sort_handles_irregular_spacing_after_article(conn, make_sig):
+    # A real title in the library had a doubled space ("THE  CHANGE"),
+    # which without an LTRIM after stripping the article left a leading
+    # space in the sort key - sorting it before every other title instead
+    # of alphabetically under "C".
+    db.upsert_story(conn, make_sig("s1", title="THE  CHANGE"))
+    db.upsert_story(conn, make_sig("s2", title="Banana"))
+    conn.commit()
+
+    results = db.search_stories(conn)
+    assert [r["title"] for r in results] == ["Banana", "THE  CHANGE"]

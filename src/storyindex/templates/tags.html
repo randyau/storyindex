@@ -2,22 +2,12 @@
 {% import "_macros.html" as m with context %}
 {% block title %}manage tags — storyindex{% endblock %}
 {% block content %}
-<h2>site tags</h2>
-<p class="muted">provided by the source archive itself — read-only here, not mergeable/renameable.</p>
-<table>
-<tr><th>label</th><th>code</th><th>stories</th></tr>
-{% for st in site_tags %}
-<tr>
-  <td><a href="{{ url_for('site_tag_detail', code=st['code']) }}">{{ st['label'] }}</a></td>
-  <td class="muted">{{ st['code'] }}</td>
-  <td>{{ st['story_count'] }}</td>
-</tr>
-{% else %}
-<tr><td colspan="3" class="muted">no site tags yet.</td></tr>
-{% endfor %}
-</table>
-
-<h2>manage tags</h2>
+<h2>manage tags <span class="muted">({{ tag_total }})</span></h2>
+<form method="get" action="{{ url_for('tags_admin') }}">
+  <input type="text" name="tag_q" value="{{ tag_q }}" placeholder="filter by name" style="width:16rem">
+  <input type="submit" value="filter">
+  {% if tag_q %}<a href="{{ url_for('tags_admin', site_q=site_q or none, site_page=site_page if site_page > 1 else none) }}">clear</a>{% endif %}
+</form>
 <table>
 <tr><th>name</th><th>stories</th><th>rename</th><th></th></tr>
 {% for t in tags %}
@@ -35,15 +25,49 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="4" class="muted">no tags yet.</td></tr>
+<tr><td colspan="4" class="muted">{% if tag_q %}no tags match "{{ tag_q }}".{% else %}no tags yet.{% endif %}</td></tr>
 {% endfor %}
 </table>
+<p class="muted">
+{% if tag_page > 1 %}<a href="{{ url_for('tags_admin', tag_q=tag_q or none, tag_page=tag_page-1, site_q=site_q or none, site_page=site_page if site_page > 1 else none) }}">← prev</a>{% endif %}
+{% if tag_page > 1 and tag_has_next %} · {% endif %}
+{% if tag_has_next %}<a href="{{ url_for('tags_admin', tag_q=tag_q or none, tag_page=tag_page+1, site_q=site_q or none, site_page=site_page if site_page > 1 else none) }}">next →</a>{% endif %}
+</p>
 
-<h3>merge tags</h3>
+<details>
+<summary><h3 style="display:inline">merge tags</h3></summary>
 <p class="muted">move all stories from one tag into another, then delete the source tag.</p>
 <form method="post" action="{{ url_for('merge_tags') }}">
   <label>from (id): <input type="number" name="src_id"></label>
   <label>into (id): <input type="number" name="dst_id"></label>
   <input type="submit" value="merge">
 </form>
+</details>
+
+<details>
+<summary><h2 style="display:inline">site tags <span class="muted">({{ site_total }})</span></h2></summary>
+<p class="muted">provided by the source archive itself — read-only here, not mergeable/renameable.</p>
+<form method="get" action="{{ url_for('tags_admin') }}">
+  <input type="text" name="site_q" value="{{ site_q }}" placeholder="filter by label" style="width:16rem">
+  <input type="submit" value="filter">
+  {% if site_q %}<a href="{{ url_for('tags_admin', tag_q=tag_q or none, tag_page=tag_page if tag_page > 1 else none) }}">clear</a>{% endif %}
+</form>
+<table>
+<tr><th>label</th><th>code</th><th>stories</th></tr>
+{% for st in site_tags %}
+<tr>
+  <td><a href="{{ url_for('site_tag_detail', code=st['code']) }}">{{ st['label'] }}</a></td>
+  <td class="muted">{{ st['code'] }}</td>
+  <td>{{ st['story_count'] }}</td>
+</tr>
+{% else %}
+<tr><td colspan="3" class="muted">{% if site_q %}no site tags match "{{ site_q }}".{% else %}no site tags yet.{% endif %}</td></tr>
+{% endfor %}
+</table>
+<p class="muted">
+{% if site_page > 1 %}<a href="{{ url_for('tags_admin', site_q=site_q or none, site_page=site_page-1, tag_q=tag_q or none, tag_page=tag_page if tag_page > 1 else none) }}">← prev</a>{% endif %}
+{% if site_page > 1 and site_has_next %} · {% endif %}
+{% if site_has_next %}<a href="{{ url_for('tags_admin', site_q=site_q or none, site_page=site_page+1, tag_q=tag_q or none, tag_page=tag_page if tag_page > 1 else none) }}">next →</a>{% endif %}
+</p>
+</details>
 {% endblock %}

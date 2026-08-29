@@ -353,19 +353,35 @@ def site_tags_for_story(conn: sqlite3.Connection, story_id: str) -> list[sqlite3
     return rows
 
 
-def list_site_tags_with_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_site_tags_with_counts(
+    conn: sqlite3.Connection, q: str | None = None, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
+    sql = """
         SELECT t.code, t.label, COUNT(st.story_id) AS story_count
         FROM site_tags t
         LEFT JOIN story_site_tags st ON st.code = t.code
-        GROUP BY t.code
-        ORDER BY story_count DESC, t.label ASC
-        """
-    ).fetchall()
+    """
+    params: list = []
+    if q:
+        sql += " WHERE t.label LIKE ?"
+        params.append(f"%{q}%")
+    sql += " GROUP BY t.code ORDER BY story_count DESC, t.label ASC"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_site_tags(conn: sqlite3.Connection, q: str | None = None) -> int:
+    sql = "SELECT COUNT(*) FROM site_tags"
+    params: list = []
+    if q:
+        sql += " WHERE label LIKE ?"
+        params.append(f"%{q}%")
+    return conn.execute(sql, params).fetchone()[0]
 
 
 def get_site_tag(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None:
@@ -375,20 +391,30 @@ def get_site_tag(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None:
     return row
 
 
-def stories_for_site_tag(conn: sqlite3.Connection, code: str) -> list[sqlite3.Row]:
+def stories_for_site_tag(
+    conn: sqlite3.Connection, code: str, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
+    sql = """
         SELECT s.id, s.group_id, s.part_index, s.title, s.author
         FROM stories s
         JOIN story_site_tags st ON st.story_id = s.id
         WHERE st.code = ?
         ORDER BY s.title ASC, s.part_index ASC
-        """,
-        (code,),
-    ).fetchall()
+    """
+    params: list = [code]
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_stories_for_site_tag(conn: sqlite3.Connection, code: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM story_site_tags WHERE code = ?", (code,)
+    ).fetchone()[0]
 
 
 # --- prompt library --------------------------------------------------------
@@ -657,35 +683,61 @@ def count_jobs(conn: sqlite3.Connection, status: str | None = None, type: str | 
 
 # --- browse / review app --------------------------------------------------
 
-def list_tags_with_counts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def list_tags_with_counts(
+    conn: sqlite3.Connection, q: str | None = None, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
+    sql = """
         SELECT t.id, t.name, COUNT(st.story_id) AS story_count
         FROM tags t
         LEFT JOIN story_tags st ON st.tag_id = t.id
-        GROUP BY t.id
-        ORDER BY story_count DESC, t.name ASC
-        """
-    ).fetchall()
+    """
+    params: list = []
+    if q:
+        sql += " WHERE t.name LIKE ?"
+        params.append(f"%{q}%")
+    sql += " GROUP BY t.id ORDER BY story_count DESC, t.name ASC"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
 
 
-def stories_for_tag(conn: sqlite3.Connection, tag_id: int) -> list[sqlite3.Row]:
+def count_tags(conn: sqlite3.Connection, q: str | None = None) -> int:
+    sql = "SELECT COUNT(*) FROM tags"
+    params: list = []
+    if q:
+        sql += " WHERE name LIKE ?"
+        params.append(f"%{q}%")
+    return conn.execute(sql, params).fetchone()[0]
+
+
+def stories_for_tag(
+    conn: sqlite3.Connection, tag_id: int, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
+    sql = """
         SELECT s.id, s.group_id, s.part_index, s.title, s.author
         FROM stories s
         JOIN story_tags st ON st.story_id = s.id
         WHERE st.tag_id = ?
         ORDER BY s.title ASC, s.part_index ASC
-        """,
-        (tag_id,),
-    ).fetchall()
+    """
+    params: list = [tag_id]
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_stories_for_tag(conn: sqlite3.Connection, tag_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM story_tags WHERE tag_id = ?", (tag_id,)
+    ).fetchone()[0]
 
 
 def get_tag(conn: sqlite3.Connection, tag_id: int) -> sqlite3.Row | None:
@@ -878,15 +930,19 @@ def _now_iso() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
-def list_removed_stories(conn: sqlite3.Connection, limit: int = 100) -> list[sqlite3.Row]:
+def list_removed_stories(conn: sqlite3.Connection, limit: int = 100, offset: int = 0) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, title, author, removed_at FROM stories "
-        "WHERE status = 'removed' ORDER BY removed_at DESC LIMIT ?",
-        (limit,),
+        "WHERE status = 'removed' ORDER BY removed_at DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     ).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_removed_stories(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM stories WHERE status = 'removed'").fetchone()[0]
 
 
 def stories_by_author(
@@ -933,21 +989,31 @@ def _sha1(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
-def stories_for_author(conn: sqlite3.Connection, author: str) -> list[sqlite3.Row]:
+def stories_for_author(
+    conn: sqlite3.Connection, author: str, limit: int | None = None, offset: int = 0
+) -> list[sqlite3.Row]:
     """Every story/part by this exact author name, for a dedicated browse
     page (unlike stories_by_author, this doesn't exclude any group)."""
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
+    sql = """
         SELECT id, group_id, part_index, title, author
         FROM stories
         WHERE author = ? AND status = 'active'
         ORDER BY title ASC, part_index ASC
-        """,
-        (author,),
-    ).fetchall()
+    """
+    params: list = [author]
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [limit, offset]
+    rows = conn.execute(sql, params).fetchall()
     conn.row_factory = None
     return rows
+
+
+def count_stories_for_author(conn: sqlite3.Connection, author: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM stories WHERE author = ? AND status = 'active'", (author,)
+    ).fetchone()[0]
 
 
 def delete_tag(conn: sqlite3.Connection, tag_id: int) -> None:
@@ -989,12 +1055,33 @@ def set_story_tag_source(conn: sqlite3.Connection, story_id: str, tag_id: int, s
     )
 
 
-def list_tag_names(conn: sqlite3.Connection) -> list[str]:
-    """For the add-tag autocomplete — steers humans toward reusing an
-    existing tag instead of minting near-duplicates the clustering pass
-    would otherwise have to fold back together."""
-    rows = conn.execute("SELECT name FROM tags ORDER BY name ASC").fetchall()
-    return [r[0] for r in rows]
+def search_tag_names(conn: sqlite3.Connection, q: str, limit: int = 20) -> list[sqlite3.Row]:
+    """Live-search backing the tag-picker autocomplete (add-tag on a story,
+    filter-by-tag on browse) - bounded and ranked by usage, unlike
+    list_tag_names's full unbounded dump, so it stays usable with
+    hundreds/thousands of tags."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT t.id, t.name, COUNT(st.story_id) AS story_count
+        FROM tags t
+        LEFT JOIN story_tags st ON st.tag_id = t.id
+        WHERE t.name LIKE ?
+        GROUP BY t.id
+        ORDER BY story_count DESC, t.name ASC
+        LIMIT ?
+        """,
+        (f"%{q}%", limit),
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
+def get_tag_by_name(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT id, name FROM tags WHERE name = ?", (name,)).fetchone()
+    conn.row_factory = None
+    return row
 
 
 def count_pending_review(conn: sqlite3.Connection, job_id: int | None = None) -> int:

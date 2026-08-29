@@ -52,6 +52,13 @@
   nav a { margin-right: 1rem; font-weight: 600; }
   nav .spacer { flex: 1; }
   nav .lib-link { font-weight: 400; color: var(--fg-muted); }
+  nav details { position: relative; margin-right: 1rem; }
+  nav details > summary { cursor: pointer; font-weight: 600; list-style: none; color: var(--fg); }
+  nav details > summary::-webkit-details-marker { display: none; }
+  nav details[open] > summary { color: var(--accent); }
+  nav .nav-menu { position: absolute; top: 100%; left: 0; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem; margin-top: 0.4rem; display: flex; flex-direction: column; min-width: 11rem; z-index: 10; }
+  nav .nav-menu a { margin: 0; padding: 0.35rem 0.5rem; font-weight: 400; border-radius: 4px; white-space: nowrap; }
+  nav .nav-menu a:hover { background: var(--pill-bg); text-decoration: none; }
   .tag-pill { display: inline-block; background: var(--pill-bg); border-radius: 999px; padding: 0.15rem 0.7rem; margin: 0.15rem; font-size: 0.9rem; }
   .tag-pill form { display: inline; }
   .tag-pill button { border: none; background: none; color: var(--danger); cursor: pointer; margin-left: 0.3rem; }
@@ -93,17 +100,56 @@
 <body>
 <nav>
   <a href="{{ url_for('index') }}">browse</a>
-  <a href="{{ url_for('new_story') }}">add story</a>
   <a href="{{ url_for('review_queue') }}">review queue</a>
-  <a href="{{ url_for('tags_admin') }}">manage tags</a>
-  <a href="{{ url_for('removed_stories') }}">removed</a>
-  <a href="{{ url_for('jobs_list') }}">jobs</a>
+  <a href="{{ url_for('tags_admin') }}">tags</a>
   <a href="{{ url_for('prompts_list') }}">prompts</a>
-  <a href="{{ url_for('ollama_status') }}">ollama</a>
-  <a href="{{ url_for('settings_page') }}">settings</a>
+  <a href="{{ url_for('jobs_list') }}">jobs</a>
+  <details>
+    <summary>manage ▾</summary>
+    <div class="nav-menu">
+      <a href="{{ url_for('new_story') }}">add a story</a>
+      <a href="{{ url_for('removed_stories') }}">removed stories</a>
+      <a href="{{ url_for('libraries_list') }}">libraries</a>
+      <a href="{{ url_for('ollama_status') }}">ollama</a>
+      <a href="{{ url_for('settings_page') }}">settings</a>
+    </div>
+  </details>
   <span class="spacer"></span>
   <a href="{{ url_for('libraries_list') }}" class="lib-link">library: {{ current_library or '(none)' }}</a>
 </nav>
 {% block content %}{% endblock %}
+<script>
+// Wires a text <input> to a <datalist>, live-populated from
+// /tags/autocomplete.json as the user types - keeps tag pickers usable
+// with hundreds/thousands of tags instead of dumping every tag name into
+// the page at once. Debounced; ignores stale responses that resolve after
+// a newer keystroke.
+function attachTagAutocomplete(inputId, datalistId) {
+  var input = document.getElementById(inputId);
+  var datalist = document.getElementById(datalistId);
+  if (!input || !datalist) return;
+  var timer = null;
+  var seq = 0;
+  input.addEventListener("input", function () {
+    var q = input.value.trim();
+    clearTimeout(timer);
+    if (!q) { datalist.innerHTML = ""; return; }
+    var mySeq = ++seq;
+    timer = setTimeout(function () {
+      fetch("{{ url_for('tags_autocomplete') }}?q=" + encodeURIComponent(q))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (mySeq !== seq) return;
+          datalist.innerHTML = "";
+          (data.tags || []).forEach(function (t) {
+            var opt = document.createElement("option");
+            opt.value = t.name;
+            datalist.appendChild(opt);
+          });
+        });
+    }, 150);
+  });
+}
+</script>
 </body>
 </html>

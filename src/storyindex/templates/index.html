@@ -27,7 +27,19 @@ coding required — a "no adapter needed" mode is available), or
 {% endif %}
 
 <h2>tags</h2>
-<p class="muted">click a tag to require it, or "exclude" to rule it out — e.g. "battle of wits" + exclude "sherlock holmes".</p>
+<p class="muted">click a tag to require it, or "exclude" to rule it out — e.g. "battle of wits" + exclude "sherlock holmes".
+{% if total_tag_count > tags|length %}showing the {{ tags|length }} most-used of {{ total_tag_count }} — <a href="{{ url_for('tags_admin') }}">see all →</a>{% endif %}
+</p>
+<form method="get" action="{{ url_for('index') }}">
+  <input type="hidden" name="q" value="{{ q }}">
+  <input type="hidden" name="tags" value="{{ tags_param }}">
+  <input type="hidden" name="exclude_tags" value="{{ exclude_tags_param }}">
+  <input type="text" id="filter-tag-input" placeholder="find a tag to filter by..." list="filter-tag-names" autocomplete="off">
+  <datalist id="filter-tag-names"></datalist>
+  <button type="submit" name="add_tag" value="" onclick="this.value=document.getElementById('filter-tag-input').value">require</button>
+  <button type="submit" name="add_exclude_tag" value="" onclick="this.value=document.getElementById('filter-tag-input').value">exclude</button>
+</form>
+<script>attachTagAutocomplete("filter-tag-input", "filter-tag-names");</script>
 <p>
 {% for tag in tags %}
   {% if tag['kind'] == 'site' %}
@@ -36,7 +48,7 @@ coding required — a "no adapter needed" mode is available), or
   <span class="tag-pill"><a href="{{ tag['include_href'] }}">{{ tag['label'] }}</a> ({{ tag['count'] }}) <a href="{{ tag['exclude_href'] }}" class="muted" title="exclude this tag">exclude</a></span>
   {% endif %}
 {% else %}
-  <span class="muted">no tags yet — run the extraction + clustering passes first.</span>
+  {% if not include_chips and not exclude_chips %}<span class="muted">no tags yet — run the extraction + clustering passes first.</span>{% endif %}
 {% endfor %}
 </p>
 

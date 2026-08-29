@@ -2,6 +2,7 @@
 {% import "_macros.html" as m with context %}
 {% block title %}{{ label }} — storyindex{% endblock %}
 {% block content %}
-<h2>tag: {{ label }}</h2>
+<h2>tag: {{ label }} <span class="muted">({{ total }})</span></h2>
 {{ m.story_list(stories, empty_message='no stories with this tag.') }}
+{{ m.pager(page, has_next, pager_endpoint, pager_params) }}
 {% endblock %}

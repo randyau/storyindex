@@ -35,14 +35,11 @@
 {% endfor %}
 </p>
 <form method="post" action="{{ url_for('add_tag', story_id=story['id']) }}">
-  <input type="text" name="name" placeholder="add tag..." list="tag-names">
+  <input type="text" id="add-tag-input" name="name" placeholder="add tag... (type to search existing)" list="tag-names" autocomplete="off">
   <input type="submit" value="add">
 </form>
-<datalist id="tag-names">
-{% for name in tag_names %}
-  <option value="{{ name }}">
-{% endfor %}
-</datalist>
+<datalist id="tag-names"></datalist>
+<script>attachTagAutocomplete("add-tag-input", "tag-names");</script>
 
 {% set pending = tags|selectattr('source', 'equalto', 'model')|list %}
 {% if pending %}

@@ -70,10 +70,17 @@ def _now() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
-def _combined_tag_cloud(conn: sqlite3.Connection) -> list[dict]:
+TAG_CLOUD_SIZE = 40
+
+
+def _combined_tag_cloud(conn: sqlite3.Connection, limit: int | None = TAG_CLOUD_SIZE) -> tuple[list[dict], int]:
     """Merge tags + site_tags into one list for display. Two separate
     storage systems underneath (see docs/crawler-parser-contract.md 3a);
-    unified only here, at the UI layer."""
+    unified only here, at the UI layer. Returns (top `limit` by story
+    count, total distinct tags) - the homepage shows a bounded cloud
+    rather than every tag in the library, with a link to /tags for the
+    rest, so a library with hundreds of tags doesn't turn browse into a
+    wall of pills."""
     combined = [
         {"kind": "site", "code": t["code"], "label": t["label"], "count": t["story_count"]}
         for t in db.list_site_tags_with_counts(conn)
@@ -82,12 +89,16 @@ def _combined_tag_cloud(conn: sqlite3.Connection) -> list[dict]:
         for t in db.list_tags_with_counts(conn)
     ]
     combined.sort(key=lambda t: (-t["count"], t["label"]))
-    return combined
+    total = len(combined)
+    if limit is not None:
+        combined = combined[:limit]
+    return combined, total
 
 
 PAGE_SIZE = 50
 PROMPTS_PAGE_SIZE = 20
 JOBS_PAGE_SIZE = 25
+TAGS_PAGE_SIZE = 50
 
 
 def _parse_tag_ids(raw: str) -> list[int]:
@@ -113,28 +124,57 @@ def index():
     q = request.args.get("q", "").strip()
     include_ids = _parse_tag_ids(request.args.get("tags", ""))
     exclude_ids = _parse_tag_ids(request.args.get("exclude_tags", ""))
+
+    # From the tag-search picker: a typed name to fold into the filter,
+    # resolved server-side so the URL only ever carries ids. Redirect to
+    # the canonical form rather than rendering here, so the picked name
+    # doesn't linger as a separate, bookmarkable-but-stale query param.
+    add_name = request.args.get("add_tag", "").strip().lower()
+    add_exclude_name = request.args.get("add_exclude_tag", "").strip().lower()
+    if add_name or add_exclude_name:
+        if add_name:
+            row = db.get_tag_by_name(conn, add_name)
+            if row is not None and row["id"] not in include_ids:
+                include_ids = include_ids + [row["id"]]
+        if add_exclude_name:
+            row = db.get_tag_by_name(conn, add_exclude_name)
+            if row is not None and row["id"] not in exclude_ids:
+                exclude_ids = exclude_ids + [row["id"]]
+        return redirect(_filter_url(q, include_ids, exclude_ids))
+
     page = max(request.args.get("page", 1, type=int), 1)
     offset = (page - 1) * PAGE_SIZE
     stories = db.search_stories(
         conn, q, include_tag_ids=include_ids, exclude_tag_ids=exclude_ids,
         limit=PAGE_SIZE, offset=offset,
     )
-    tags = _combined_tag_cloud(conn)
+    cloud_tags, total_tag_count = _combined_tag_cloud(conn, limit=TAG_CLOUD_SIZE)
 
-    include_chips = []
-    exclude_chips = []
+    # Chip labels come from a direct lookup, not the (bounded) cloud, so a
+    # selected tag outside the top TAG_CLOUD_SIZE by story count still
+    # shows its name correctly instead of silently vanishing from view.
+    selected_ids = set(include_ids) | set(exclude_ids)
+    label_by_id = {t["id"]: t["label"] for t in cloud_tags if t["kind"] == "tag" and t["id"] in selected_ids}
+    for tid in selected_ids - label_by_id.keys():
+        row = db.get_tag(conn, tid)
+        if row is not None:
+            label_by_id[tid] = row["name"]
+
+    include_chips = [
+        {"label": label_by_id[i], "remove_href": _filter_url(q, [x for x in include_ids if x != i], exclude_ids)}
+        for i in include_ids if i in label_by_id
+    ]
+    exclude_chips = [
+        {"label": label_by_id[i], "remove_href": _filter_url(q, include_ids, [x for x in exclude_ids if x != i])}
+        for i in exclude_ids if i in label_by_id
+    ]
+
     cloud = []
-    for t in tags:
+    for t in cloud_tags:
+        if t["kind"] == "tag" and t["id"] in selected_ids:
+            continue
         if t["kind"] != "tag":
             cloud.append({**t, "include_href": None, "exclude_href": None})
-            continue
-        if t["id"] in include_ids:
-            other = [i for i in include_ids if i != t["id"]]
-            include_chips.append({"label": t["label"], "remove_href": _filter_url(q, other, exclude_ids)})
-            continue
-        if t["id"] in exclude_ids:
-            other = [i for i in exclude_ids if i != t["id"]]
-            exclude_chips.append({"label": t["label"], "remove_href": _filter_url(q, include_ids, other)})
             continue
         cloud.append({
             **t,
@@ -147,6 +187,7 @@ def index():
         "index.html",
         stories=stories,
         tags=cloud,
+        total_tag_count=total_tag_count,
         include_chips=include_chips,
         exclude_chips=exclude_chips,
         tags_param=",".join(str(i) for i in include_ids),
@@ -164,8 +205,15 @@ def tag_detail(tag_id: int):
     tag = db.get_tag(conn, tag_id)
     if tag is None:
         return "tag not found", 404
-    stories = db.stories_for_tag(conn, tag_id)
-    return render_template("tag.html", label=tag["name"], stories=stories)
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    stories = db.stories_for_tag(conn, tag_id, limit=PAGE_SIZE, offset=offset)
+    total = db.count_stories_for_tag(conn, tag_id)
+    return render_template(
+        "tag.html", label=tag["name"], stories=stories, page=page, total=total,
+        has_next=offset + len(stories) < total,
+        pager_endpoint="tag_detail", pager_params={"tag_id": tag_id},
+    )
 
 
 @app.route("/site-tag/<code>")
@@ -174,8 +222,15 @@ def site_tag_detail(code: str):
     tag = db.get_site_tag(conn, code)
     if tag is None:
         return "tag not found", 404
-    stories = db.stories_for_site_tag(conn, code)
-    return render_template("tag.html", label=tag["label"], stories=stories)
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    stories = db.stories_for_site_tag(conn, code, limit=PAGE_SIZE, offset=offset)
+    total = db.count_stories_for_site_tag(conn, code)
+    return render_template(
+        "tag.html", label=tag["label"], stories=stories, page=page, total=total,
+        has_next=offset + len(stories) < total,
+        pager_endpoint="site_tag_detail", pager_params={"code": code},
+    )
 
 
 @app.route("/story/<story_id>")
@@ -187,12 +242,11 @@ def story_detail(story_id: str):
     parts = db.get_group_parts(conn, story["group_id"])
     tags = db.tags_for_story(conn, story_id)
     site_tags = db.site_tags_for_story(conn, story_id)
-    tag_names = db.list_tag_names(conn)
     prompts = db.list_prompts(conn)
     more_by_author = db.stories_by_author(conn, story["author"], story["group_id"])
     return render_template(
         "story.html",
-        story=story, parts=parts, tags=tags, site_tags=site_tags, tag_names=tag_names,
+        story=story, parts=parts, tags=tags, site_tags=site_tags,
         prompts=prompts, more_by_author=more_by_author,
     )
 
@@ -200,8 +254,14 @@ def story_detail(story_id: str):
 @app.route("/stories/removed")
 def removed_stories():
     conn = get_db()
-    stories = db.list_removed_stories(conn)
-    return render_template("removed_stories.html", stories=stories)
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    stories = db.list_removed_stories(conn, limit=PAGE_SIZE, offset=offset)
+    total = db.count_removed_stories(conn)
+    return render_template(
+        "removed_stories.html", stories=stories, page=page, total=total,
+        has_next=offset + len(stories) < total,
+    )
 
 
 @app.route("/stories/new", methods=["GET", "POST"])
@@ -229,8 +289,14 @@ def new_story():
 @app.route("/author/<path:author>")
 def author_detail(author: str):
     conn = get_db()
-    stories = db.stories_for_author(conn, author)
-    return render_template("author.html", author=author, stories=stories)
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    stories = db.stories_for_author(conn, author, limit=PAGE_SIZE, offset=offset)
+    total = db.count_stories_for_author(conn, author)
+    return render_template(
+        "author.html", author=author, stories=stories, page=page, total=total,
+        has_next=offset + len(stories) < total,
+    )
 
 
 @app.route("/story/<story_id>/remove", methods=["POST"])
@@ -247,6 +313,16 @@ def restore_story(story_id: str):
     db.set_story_status(conn, story_id, "active")
     conn.commit()
     return redirect(url_for("story_detail", story_id=story_id))
+
+
+@app.route("/tags/autocomplete.json")
+def tags_autocomplete():
+    conn = get_db()
+    q = request.args.get("q", "").strip()
+    if not q:
+        return {"tags": []}
+    rows = db.search_tag_names(conn, q, limit=20)
+    return {"tags": [{"id": r["id"], "name": r["name"], "count": r["story_count"]} for r in rows]}
 
 
 @app.route("/story/<story_id>/tags", methods=["POST"])
@@ -610,9 +686,25 @@ def rename_library_route():
 @app.route("/tags")
 def tags_admin():
     conn = get_db()
-    tags = db.list_tags_with_counts(conn)
-    site_tags = db.list_site_tags_with_counts(conn)
-    return render_template("tags.html", tags=tags, site_tags=site_tags)
+    tag_q = request.args.get("tag_q", "").strip()
+    tag_page = max(request.args.get("tag_page", 1, type=int), 1)
+    tag_offset = (tag_page - 1) * TAGS_PAGE_SIZE
+    tags = db.list_tags_with_counts(conn, q=tag_q or None, limit=TAGS_PAGE_SIZE, offset=tag_offset)
+    tag_total = db.count_tags(conn, q=tag_q or None)
+
+    site_q = request.args.get("site_q", "").strip()
+    site_page = max(request.args.get("site_page", 1, type=int), 1)
+    site_offset = (site_page - 1) * TAGS_PAGE_SIZE
+    site_tags = db.list_site_tags_with_counts(conn, q=site_q or None, limit=TAGS_PAGE_SIZE, offset=site_offset)
+    site_total = db.count_site_tags(conn, q=site_q or None)
+
+    return render_template(
+        "tags.html",
+        tags=tags, tag_q=tag_q, tag_page=tag_page, tag_total=tag_total,
+        tag_has_next=tag_offset + len(tags) < tag_total,
+        site_tags=site_tags, site_q=site_q, site_page=site_page, site_total=site_total,
+        site_has_next=site_offset + len(site_tags) < site_total,
+    )
 
 
 @app.route("/tags/<int:tag_id>/rename", methods=["POST"])

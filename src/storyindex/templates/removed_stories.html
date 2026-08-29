@@ -2,7 +2,7 @@
 {% import "_macros.html" as m with context %}
 {% block title %}removed stories — storyindex{% endblock %}
 {% block content %}
-<h2>removed stories</h2>
+<h2>removed stories <span class="muted">({{ total }})</span></h2>
 <p class="muted">hidden from browse/search but not deleted — tags and history are kept, restore any time.</p>
 <table>
 <tr><th>title</th><th>author</th><th>removed</th><th></th></tr>
@@ -19,4 +19,5 @@
 <tr><td colspan="4" class="muted">no removed stories.</td></tr>
 {% endfor %}
 </table>
+{{ m.pager(page, has_next, 'removed_stories') }}
 {% endblock %}

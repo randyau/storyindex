@@ -2,6 +2,7 @@
 {% import "_macros.html" as m with context %}
 {% block title %}{{ author }} — storyindex{% endblock %}
 {% block content %}
-<h2>{{ author }}</h2>
+<h2>{{ author }} <span class="muted">({{ total }})</span></h2>
 {{ m.story_list(stories, show_author=False, empty_message='no stories by this author.') }}
+{{ m.pager(page, has_next, 'author_detail', {'author': author}) }}
 {% endblock %}

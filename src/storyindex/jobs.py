@@ -29,6 +29,14 @@ from storyindex.cluster import DEFAULT_EMBED_MODEL, canonical_name, cluster_tag_
 from storyindex.signature import StorySignature
 
 COMMIT_EVERY = 10
+# Extract jobs interleave a slow model call (seconds) with each write. An
+# uncommitted write holds SQLite's single WAL writer slot, so batching
+# COMMIT_EVERY writes here would hold that slot for the sum of several
+# stories' worth of model latency - long enough to starve a concurrent
+# extract job (or the Flask app itself) well past PRAGMA busy_timeout.
+# Cluster jobs don't have this problem: their one slow call (embedding)
+# happens once up front, before the write loop starts.
+EXTRACT_COMMIT_EVERY = 1
 
 
 def _now() -> str:
@@ -95,7 +103,7 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
                 )
                 db.increment_job_progress(conn, job_id, done=1)
             since_commit += 1
-            if since_commit >= COMMIT_EVERY:
+            if since_commit >= EXTRACT_COMMIT_EVERY:
                 conn.commit()
                 since_commit = 0
 
@@ -297,7 +305,27 @@ def main() -> None:
     parser.add_argument("--job-id", type=int, required=True)
     parser.add_argument("--db", type=Path, required=True)
     args = parser.parse_args()
-    run_job(args.db, args.job_id)
+    try:
+        run_job(args.db, args.job_id)
+    except Exception as exc:  # noqa: BLE001
+        # _spawn_job routes this process's stdout/stderr to DEVNULL, so an
+        # exception here (e.g. db.connect() itself hitting "database is
+        # locked" under concurrent job load, before the runner's own
+        # try/except even starts) would otherwise vanish - the job just
+        # sits at "queued" forever with no pid and no error, and nothing
+        # short of noticing the missing process would ever explain why.
+        # Each run_*_job already marks its own failures; this is only a
+        # backstop for whatever happens outside that.
+        try:
+            conn = db.connect(args.db)
+            job = db.get_job(conn, args.job_id)
+            if job is not None and job["status"] in ("queued", "running"):
+                db.mark_job_failed(conn, args.job_id, _now(), f"job process crashed: {exc}")
+                conn.commit()
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort; don't mask the original error
+            pass
+        raise
 
 
 if __name__ == "__main__":

@@ -157,3 +157,26 @@ def test_cluster_job_folds_candidates_into_tags(db_path, make_sig, monkeypatch):
     ).fetchone()[0]
     assert remaining == 0
     conn.close()
+
+
+def test_main_marks_job_failed_when_run_job_crashes_before_its_own_handler(db_path, monkeypatch):
+    # _spawn_job sends this process's stdout/stderr to DEVNULL, so a crash
+    # outside run_extract_job/run_cluster_job's own try/except (e.g.
+    # db.connect() itself raising under concurrent job load) would
+    # otherwise leave the job stuck at "queued" forever with no trace.
+    conn = db.connect(db_path)
+    job_id = db.create_job(conn, "extract", _now())
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(jobs, "run_job", lambda db_path, job_id: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("sys.argv", ["jobs.py", "--job-id", str(job_id), "--db", str(db_path)])
+
+    with pytest.raises(RuntimeError, match="boom"):
+        jobs.main()
+
+    conn = db.connect(db_path)
+    job = db.get_job(conn, job_id)
+    assert job["status"] == "failed"
+    assert "boom" in job["error"]
+    conn.close()

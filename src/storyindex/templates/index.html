@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}browse — storyindex{% endblock %}
 {% block content %}
 <form method="get" action="{{ url_for('index') }}">
@@ -20,9 +21,9 @@ coding required — a "no adapter needed" mode is available), or
 <p>
 {% for tag in tags %}
   {% if tag['kind'] == 'site' %}
-  <a class="tag-pill" href="{{ url_for('site_tag_detail', code=tag['code']) }}">{{ tag['label'] }} ({{ tag['count'] }})</a>
+  {{ m.tag_pill_link(url_for('site_tag_detail', code=tag['code']), tag['label'], tag['count']) }}
   {% else %}
-  <a class="tag-pill" href="{{ url_for('tag_detail', tag_id=tag['id']) }}">{{ tag['label'] }} ({{ tag['count'] }})</a>
+  {{ m.tag_pill_link(url_for('tag_detail', tag_id=tag['id']), tag['label'], tag['count']) }}
   {% endif %}
 {% else %}
   <span class="muted">no tags yet — run the extraction + clustering passes first.</span>
@@ -30,21 +31,7 @@ coding required — a "no adapter needed" mode is available), or
 </p>
 
 <h2>{% if q %}results for "{{ q }}"{% else %}stories{% endif %}</h2>
-<ul class="story-list">
-{% for s in stories %}
-  <li>
-    <a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a>
-    <span class="muted">by {{ s['author'] }}{% if s['part_index'] > 0 %}, part {{ s['part_index'] + 1 }}{% endif %}</span>
-    {% if q %}<div class="snippet">{{ s['snippet']|safe }}</div>{% endif %}
-  </li>
-{% else %}
-  <li class="muted">no stories.</li>
-{% endfor %}
-</ul>
+{{ m.story_list(stories, show_snippet=q) }}
 
-<p class="muted">
-{% if page > 1 %}<a href="{{ url_for('index', q=q, page=page-1) }}">← prev</a>{% endif %}
-{% if page > 1 and has_next %} · {% endif %}
-{% if has_next %}<a href="{{ url_for('index', q=q, page=page+1) }}">next →</a>{% endif %}
-</p>
+{{ m.pager(page, has_next, 'index', {'q': q}) }}
 {% endblock %}

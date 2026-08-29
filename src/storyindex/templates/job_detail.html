@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}job {{ job['id'] }} — storyindex{% endblock %}
 {% block content %}
 <h2>job #{{ job['id'] }} — {{ job['type'] }}</h2>
@@ -30,10 +31,7 @@
 {% endif %}
 
 {% if job['status'] == 'done' and not job['reverted_at'] %}
-<form method="post" action="{{ url_for('revert_job', job_id=job['id']) }}"
-      onsubmit="return confirm('Undo everything this job produced (its proposed/approved tags)? This cannot be undone.')">
-  <button>revert this run</button>
-</form>
+{{ m.action_form(url_for('revert_job', job_id=job['id']), 'revert this run', confirm='Undo everything this job produced (its proposed/approved tags)? This cannot be undone.') }}
 {% endif %}
 
 <p><a href="{{ url_for('jobs_list') }}">← back to jobs</a></p>

@@ -1,0 +1,57 @@
+{# Shared UI building blocks. Import with `with context` so macros can
+   call url_for() using the caller's view context:
+     {% import "_macros.html" as m with context %}
+#}
+
+{% macro story_list(stories, show_author=True, show_snippet=False, empty_message='no stories.') %}
+<ul class="story-list">
+{% for s in stories %}
+  <li>
+    <a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a>
+    {% if show_author %}
+    <span class="muted">by {{ s['author'] }}{% if s['part_index'] > 0 %}, part {{ s['part_index'] + 1 }}{% endif %}</span>
+    {% elif s['part_index'] > 0 %}
+    <span class="muted">part {{ s['part_index'] + 1 }}</span>
+    {% endif %}
+    {% if show_snippet and s['snippet'] is defined and s['snippet'] %}<div class="snippet">{{ s['snippet']|safe }}</div>{% endif %}
+  </li>
+{% else %}
+  <li class="muted">{{ empty_message }}</li>
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{# A pill linking to a tag/site-tag page, optionally showing a story count. #}
+{% macro tag_pill_link(href, label, count=None) %}
+<a class="tag-pill" href="{{ href }}">{{ label }}{% if count is not none %} ({{ count }}){% endif %}</a>
+{% endmacro %}
+
+{# A pill for a tag attached to one story: plain text or linked, with
+   optional inline approve/delete action forms. #}
+{% macro tag_pill(label, href=None, approve_action=None, delete_action=None, delete_title='remove') %}
+<span class="tag-pill">
+  {% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}{{ label }}{% endif %}
+  {% if approve_action %}<form method="post" action="{{ approve_action }}" style="display:inline"><button title="approve">✓</button></form>{% endif %}
+  {% if delete_action %}<form method="post" action="{{ delete_action }}" style="display:inline"><button title="{{ delete_title }}">✕</button></form>{% endif %}
+</span>
+{% endmacro %}
+
+{# prev/next pager. `params` is a dict of extra query params to carry
+   through (e.g. {'q': q} or {'job_id': job_id}); None values are
+   dropped from the built URL automatically. #}
+{% macro pager(page, has_next, endpoint, params={}) %}
+<p class="muted">
+{% if page > 1 %}<a href="{{ url_for(endpoint, page=page-1, **params) }}">← prev</a>{% endif %}
+{% if page > 1 and has_next %} · {% endif %}
+{% if has_next %}<a href="{{ url_for(endpoint, page=page+1, **params) }}">next →</a>{% endif %}
+</p>
+{% endmacro %}
+
+{# A single-button POST form — the recurring "remove"/"restore"/"delete"/
+   "approve all" pattern. `hidden` is a dict of hidden input fields. #}
+{% macro action_form(action, label, confirm=None, hidden={}) %}
+<form method="post" action="{{ action }}" style="display:inline"{% if confirm %} onsubmit="return confirm('{{ confirm }}')"{% endif %}>
+  {% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <button>{{ label }}</button>
+</form>
+{% endmacro %}

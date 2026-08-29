@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}manage tags — storyindex{% endblock %}
 {% block content %}
 <h2>site tags</h2>
@@ -30,9 +31,7 @@
     </form>
   </td>
   <td>
-    <form method="post" action="{{ url_for('delete_tag_route', tag_id=t['id']) }}" style="display:inline" onsubmit="return confirm('Delete tag &quot;{{ t['name'] }}&quot;? Removes it from every story it is linked to.')">
-      <button>delete</button>
-    </form>
+    {{ m.action_form(url_for('delete_tag_route', tag_id=t['id']), 'delete', confirm='Delete tag &quot;' + t['name'] + '&quot;? Removes it from every story it is linked to.') }}
   </td>
 </tr>
 {% else %}

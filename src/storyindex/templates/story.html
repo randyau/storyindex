@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}{{ story['title'] }} — storyindex{% endblock %}
 {% block content %}
 <h2>{{ story['title'] }}</h2>
@@ -6,9 +7,9 @@
   by <a href="{{ url_for('author_detail', author=story['author']) }}">{{ story['author'] }}</a>
   {% if story['status'] == 'removed' %}
   · <strong>removed from the library</strong> ({{ story['removed_at'] }})
-  <form method="post" action="{{ url_for('restore_story', story_id=story['id']) }}" style="display:inline"><button>restore</button></form>
+  {{ m.action_form(url_for('restore_story', story_id=story['id']), 'restore') }}
   {% else %}
-  · <form method="post" action="{{ url_for('remove_story', story_id=story['id']) }}" style="display:inline" onsubmit="return confirm('Remove this story from browse/search? Tags and history are kept.')"><button>remove</button></form>
+  · {{ m.action_form(url_for('remove_story', story_id=story['id']), 'remove', confirm='Remove this story from browse/search? Tags and history are kept.') }}
   {% endif %}
 </p>
 
@@ -23,18 +24,12 @@
 <h3>tags</h3>
 <p>
 {% for st in site_tags %}
-  <span class="tag-pill">
-    <a href="{{ url_for('site_tag_detail', code=st['code']) }}">{{ st['label'] }}</a>
-  </span>
+  {{ m.tag_pill(st['label'], href=url_for('site_tag_detail', code=st['code'])) }}
 {% endfor %}
 {% for t in tags %}
-  <span class="tag-pill">
-    <a href="{{ url_for('tag_detail', tag_id=t['id']) }}">{{ t['name'] }}</a>
-    {% if t['source'] == 'model' %}
-    <form method="post" action="{{ url_for('approve_tag', story_id=story['id'], tag_id=t['id']) }}"><button title="confirm">✓</button></form>
-    {% endif %}
-    <form method="post" action="{{ url_for('delete_tag', story_id=story['id'], tag_id=t['id']) }}"><button title="remove">✕</button></form>
-  </span>
+  {{ m.tag_pill(t['name'], href=url_for('tag_detail', tag_id=t['id']),
+                approve_action=url_for('approve_tag', story_id=story['id'], tag_id=t['id']) if t['source'] == 'model' else None,
+                delete_action=url_for('delete_tag', story_id=story['id'], tag_id=t['id'])) }}
 {% else %}
   {% if not site_tags %}<span class="muted">no tags yet.</span>{% endif %}
 {% endfor %}
@@ -53,12 +48,8 @@
 {% if pending %}
 <p class="muted">
   {{ pending|length }} tag{{ 's' if pending|length != 1 }} awaiting review —
-  <form method="post" action="{{ url_for('approve_all_tags', story_id=story['id']) }}" style="display:inline">
-    <button>approve all</button>
-  </form>
-  <form method="post" action="{{ url_for('reject_all_tags', story_id=story['id']) }}" style="display:inline">
-    <button>reject all</button>
-  </form>
+  {{ m.action_form(url_for('approve_all_tags', story_id=story['id']), 'approve all') }}
+  {{ m.action_form(url_for('reject_all_tags', story_id=story['id']), 'reject all') }}
 </p>
 {% endif %}
 
@@ -79,10 +70,6 @@
 
 {% if more_by_author %}
 <h3>more by {{ story['author'] }}</h3>
-<ul class="story-list">
-{% for s in more_by_author %}
-  <li><a href="{{ url_for('story_detail', story_id=s['id']) }}">{{ s['title'] }}</a></li>
-{% endfor %}
-</ul>
+{{ m.story_list(more_by_author, show_author=False) }}
 {% endif %}
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}removed stories — storyindex{% endblock %}
 {% block content %}
 <h2>removed stories</h2>
@@ -11,9 +12,7 @@
   <td>{{ s['author'] }}</td>
   <td class="muted">{{ s['removed_at'] }}</td>
   <td>
-    <form method="post" action="{{ url_for('restore_story', story_id=s['id']) }}" style="display:inline">
-      <button>restore</button>
-    </form>
+    {{ m.action_form(url_for('restore_story', story_id=s['id']), 'restore') }}
   </td>
 </tr>
 {% else %}

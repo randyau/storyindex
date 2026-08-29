@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m with context %}
 {% block title %}review queue — storyindex{% endblock %}
 {% block content %}
 <h2>review queue{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
@@ -14,29 +15,18 @@ Approve to keep a tag (folds it into the human-confirmed set), reject to drop it
   <p class="muted">by {{ item['story']['author'] }}</p>
   <p>
   {% for t in item['tags'] %}
-    <span class="tag-pill">
-      {{ t['name'] }}
-      <form method="post" action="{{ url_for('approve_tag', story_id=item['story']['id'], tag_id=t['id']) }}" style="display:inline"><button title="approve">✓</button></form>
-      <form method="post" action="{{ url_for('delete_tag', story_id=item['story']['id'], tag_id=t['id']) }}" style="display:inline"><button title="reject">✕</button></form>
-    </span>
+    {{ m.tag_pill(t['name'],
+                  approve_action=url_for('approve_tag', story_id=item['story']['id'], tag_id=t['id']),
+                  delete_action=url_for('delete_tag', story_id=item['story']['id'], tag_id=t['id']),
+                  delete_title='reject') }}
   {% endfor %}
   </p>
-  <form method="post" action="{{ url_for('approve_all_tags', story_id=item['story']['id']) }}" style="display:inline">
-    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page, job_id=job_id) }}">
-    <button>approve all</button>
-  </form>
-  <form method="post" action="{{ url_for('reject_all_tags', story_id=item['story']['id']) }}" style="display:inline">
-    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page, job_id=job_id) }}">
-    <button>reject all</button>
-  </form>
+  {{ m.action_form(url_for('approve_all_tags', story_id=item['story']['id']), 'approve all', hidden={'next': url_for('review_queue', page=page, job_id=job_id)}) }}
+  {{ m.action_form(url_for('reject_all_tags', story_id=item['story']['id']), 'reject all', hidden={'next': url_for('review_queue', page=page, job_id=job_id)}) }}
 </div>
 {% else %}
 <p class="muted">nothing pending — the review queue is clear.</p>
 {% endfor %}
 
-<p class="muted">
-{% if page > 1 %}<a href="{{ url_for('review_queue', page=page-1, job_id=job_id) }}">← prev</a>{% endif %}
-{% if page > 1 and has_next %} · {% endif %}
-{% if has_next %}<a href="{{ url_for('review_queue', page=page+1, job_id=job_id) }}">next →</a>{% endif %}
-</p>
+{{ m.pager(page, has_next, 'review_queue', {'job_id': job_id}) }}
 {% endblock %}

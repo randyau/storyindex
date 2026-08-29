@@ -10,6 +10,30 @@ import requests
 
 DEFAULT_HOST = "http://localhost:11434"
 
+# Ollama defaults num_ctx to a small window (historically 2048-4096)
+# regardless of what the model itself supports, silently truncating any
+# prompt longer than that instead of erroring — so a story tagging prompt
+# that doesn't set this gets the model reading only the first page or two
+# of a story it's supposed to tag in full. We size it per-request from the
+# actual prompt length instead, rounded up to the next power-of-two-ish
+# bucket so KV-cache allocation stays predictable rather than a fresh size
+# every call. Capped at 32768: bigger buckets exist for the handful of
+# very long stories, but past this point VRAM on modest cards runs out
+# before context does, and a story that long was going to lose fidelity to
+# an LLM's attention anyway.
+_CTX_BUCKETS = [4096, 8192, 16384, 32768]
+_CHARS_PER_TOKEN = 4  # rough estimator; erring high costs a bit of unused KV-cache, erring low truncates input
+
+
+def _estimate_num_ctx(prompt: str) -> int:
+    est_tokens = len(prompt) // _CHARS_PER_TOKEN
+    # Leave headroom for the model's own output tokens on top of the prompt.
+    needed = est_tokens + 512
+    for bucket in _CTX_BUCKETS:
+        if needed <= bucket:
+            return bucket
+    return _CTX_BUCKETS[-1]
+
 
 class OllamaError(RuntimeError):
     pass
@@ -20,10 +44,13 @@ def generate_json(
     model: str,
     host: str = DEFAULT_HOST,
     temperature: float = 0.2,
-    timeout: int = 120,
+    timeout: int = 300,
 ) -> dict:
     """Send prompt to the local model, requesting strict JSON output.
-    Raises OllamaError on transport failure or unparsable output."""
+    Raises OllamaError on transport failure or unparsable output. Default
+    timeout is generous because num_ctx now scales with prompt length (see
+    _estimate_num_ctx) — a long story means a long prefill, not just a
+    long generation."""
     try:
         resp = requests.post(
             f"{host}/api/generate",
@@ -32,7 +59,7 @@ def generate_json(
                 "prompt": prompt,
                 "format": "json",
                 "stream": False,
-                "options": {"temperature": temperature},
+                "options": {"temperature": temperature, "num_ctx": _estimate_num_ctx(prompt)},
             },
             timeout=timeout,
         )

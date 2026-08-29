@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS story_tags (
     PRIMARY KEY (story_id, tag_id)
 );
 
+-- tag_id leads the PK's index but only in the (story_id, tag_id) order,
+-- so a lookup/GROUP BY keyed on tag_id alone (list_tags_with_counts, the
+-- homepage tag cloud) still needs its own index rather than reusing that
+-- one. Same story for source (count_pending_review) — see idx_story_tags_source_story below.
+CREATE INDEX IF NOT EXISTS idx_story_tags_tag ON story_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_story_tags_source_story ON story_tags(source, story_id);
+
 -- Site-provided tags: a separate storage system from tags/story_tags above.
 -- Populated straight from StorySignature.tags at ingest time, treated as
 -- read-only in the UI. See docs/crawler-parser-contract.md section 3a.
@@ -71,6 +78,12 @@ CREATE TABLE IF NOT EXISTS story_site_tags (
     code        TEXT NOT NULL REFERENCES site_tags(code),
     PRIMARY KEY (story_id, code)
 );
+
+-- Same reasoning as idx_story_tags_tag: the PK only helps story_id-first
+-- lookups, but list_site_tags_with_counts (also on the homepage) groups by
+-- code, so without this SQLite built a throwaway automatic index over the
+-- whole table on every single request.
+CREATE INDEX IF NOT EXISTS idx_story_site_tags_code ON story_site_tags(code);
 
 -- Versioned, saved-for-reuse prompt library. Every save is a new row
 -- (never edited in place) so a job run against prompt #7 stays
@@ -162,6 +175,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
         if col not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
+    # status is an additive column (see above), so its index can't live in
+    # the CREATE TABLE block. Without it, every browse/search query — which
+    # all filter on status='active' and sort by title — falls back to a full
+    # table scan that reads every row's body_text off disk before checking
+    # status. On a multi-GB library that's tens of seconds instead of
+    # milliseconds; this index turns it into an index seek.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stories_status_title ON stories(status, title)")
 
 
 def _ensure_fts(conn: sqlite3.Connection) -> None:
@@ -542,6 +562,21 @@ def mark_job_failed(conn: sqlite3.Connection, job_id: int, finished_at: str, err
     )
 
 
+def cancel_job(conn: sqlite3.Connection, job_id: int, finished_at: str) -> int | None:
+    """Best-effort cancel of a queued/running job: returns its pid (for the
+    caller to actually kill — this module doesn't touch processes) and
+    marks the row failed with an explanatory error. No-op (returns None)
+    if the job isn't in a cancellable state, so a stale button click or a
+    double-submit can't clobber a job that already finished on its own."""
+    row = conn.execute(
+        "SELECT pid FROM jobs WHERE id = ? AND status IN ('queued', 'running')", (job_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    mark_job_failed(conn, job_id, finished_at, "cancelled by user")
+    return row[0]
+
+
 def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
     conn.row_factory = sqlite3.Row
     row = conn.execute(
@@ -572,21 +607,27 @@ def revert_job(conn: sqlite3.Connection, job_id: int, reverted_at: str) -> None:
 
 
 def reap_stale_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
-    """Called unconditionally at app startup: any job still 'running' at
-    that point cannot actually be running (this app is a single
-    supervising process; if it's starting fresh, whatever process was
-    updating that job's progress is gone - crash, kill, power loss).
-    Marks them failed with an explanatory error rather than leaving a
-    phantom "running" job with a stale pid forever. The rows/commits that
-    job already made before dying are untouched and remain valid (see
-    connect()'s WAL/synchronous note) - only the job's own status reflects
-    that it didn't finish. Returns the ids marked."""
+    """Called unconditionally at app startup. Job subprocesses are
+    deliberately detached (see _spawn_job) so they outlive the Flask
+    process across a restart - a 'running' job here is not necessarily
+    dead, so this checks pid liveness (like reap_dead_pid_jobs) before
+    reaping rather than assuming a fresh app start means every in-flight
+    job died with the old one. Only jobs with no recorded pid (crashed
+    before ever reaching mark_job_running) or a pid that's no longer alive
+    get marked failed. The rows/commits an already-dead job made before
+    dying are untouched and remain valid (see connect()'s WAL/synchronous
+    note) - only the job's own status reflects that it didn't finish.
+    Returns the ids marked."""
     conn.row_factory = sqlite3.Row
-    stale = conn.execute("SELECT id FROM jobs WHERE status = 'running'").fetchall()
+    never_started = conn.execute(
+        "SELECT id FROM jobs WHERE status = 'running' AND pid IS NULL"
+    ).fetchall()
     conn.row_factory = None
-    for row in stale:
+    reaped = []
+    for row in never_started:
         mark_job_failed(conn, row["id"], now, "interrupted (app restarted while this job was running)")
-    return [row["id"] for row in stale]
+        reaped.append(row["id"])
+    return reaped + reap_dead_pid_jobs(conn, now)
 
 
 def reap_dead_pid_jobs(conn: sqlite3.Connection, now: str) -> list[int]:

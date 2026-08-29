@@ -36,6 +36,39 @@
 </span>
 {% endmacro %}
 
+{# Chapter nav for a multi-part story: prev/next links plus a bounded
+   window of part numbers around the current one (not the full list —
+   a 300+ chapter serial would otherwise dump a wall of numbers on every
+   page). `parts` is the full ordered list of sibling rows from
+   db.get_group_parts; `current` is the story row being displayed. #}
+{% macro chapter_nav(current, parts) %}
+{% if parts|length > 1 %}
+{% set idx = current['part_index'] %}
+{% set total = parts|length %}
+{% set window = 3 %}
+<p class="muted chapter-nav">
+  part {{ idx + 1 }} of {{ total }}
+  {% if idx > 0 %}· <a href="{{ url_for('story_detail', story_id=parts[idx-1]['id']) }}">← prev chapter</a>{% endif %}
+  {% if idx < total - 1 %}· <a href="{{ url_for('story_detail', story_id=parts[idx+1]['id']) }}">next chapter →</a>{% endif %}
+</p>
+<p class="muted chapter-list">
+{% if total > (window * 2 + 3) %}
+  {% set win_start = [idx - window, 0]|max %}
+  {% set win_end = [idx + window + 1, total]|min %}
+  {% if win_start > 0 %}<a href="{{ url_for('story_detail', story_id=parts[0]['id']) }}">1</a> …{% endif %}
+  {% for p in parts[win_start:win_end] %}
+    {% if p['id'] == current['id'] %}<strong>{{ p['part_index'] + 1 }}</strong>{% else %}<a href="{{ url_for('story_detail', story_id=p['id']) }}">{{ p['part_index'] + 1 }}</a>{% endif %}
+  {% endfor %}
+  {% if win_end < total %}… <a href="{{ url_for('story_detail', story_id=parts[-1]['id']) }}">{{ total }}</a>{% endif %}
+{% else %}
+  {% for p in parts %}
+    {% if p['id'] == current['id'] %}<strong>{{ p['part_index'] + 1 }}</strong>{% else %}<a href="{{ url_for('story_detail', story_id=p['id']) }}">{{ p['part_index'] + 1 }}</a>{% endif %}
+  {% endfor %}
+{% endif %}
+</p>
+{% endif %}
+{% endmacro %}
+
 {# prev/next pager. `params` is a dict of extra query params to carry
    through (e.g. {'q': q} or {'job_id': job_id}); None values are
    dropped from the built URL automatically. #}

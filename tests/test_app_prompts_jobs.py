@@ -159,6 +159,29 @@ def test_create_extract_job_runs_to_completion(tmp_path, make_sig, monkeypatch):
     conn.close()
 
 
+def test_cancel_job_route_marks_failed_and_signals_process(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z")
+    db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=999999)
+    conn.commit()
+    conn.close()
+
+    killed = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: killed.append((pid, sig)))
+
+    client = _client(dbpath)
+    r = client.post(f"/jobs/{job_id}/cancel")
+    assert r.status_code == 302
+    assert killed == [(999999, __import__("signal").SIGTERM)]
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, job_id)
+    assert job["status"] == "failed"
+    assert job["error"] == "cancelled by user"
+    conn.close()
+
+
 def test_job_status_json_endpoint(tmp_path):
     dbpath = tmp_path / "t.sqlite"
     conn = db.connect(dbpath)

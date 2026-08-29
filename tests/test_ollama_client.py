@@ -81,3 +81,19 @@ def test_start_server_raises_ollama_error_when_cli_missing(monkeypatch):
 def test_recommended_models_includes_embedding_model():
     names = [m["name"] for m in ollama_client.RECOMMENDED_MODELS]
     assert "nomic-embed-text" in names
+
+
+def test_generate_json_sizes_num_ctx_to_prompt_length(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["options"] = json["options"]
+        return FakeResponse({"response": '{"tags": ["a"]}'})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    ollama_client.generate_json("short prompt", model="m")
+    assert captured["options"]["num_ctx"] == 4096
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    ollama_client.generate_json("x" * 40000, model="m")
+    assert captured["options"]["num_ctx"] == 16384

@@ -34,6 +34,10 @@
 {{ m.action_form(url_for('revert_job', job_id=job['id']), 'revert this run', confirm='Undo everything this job produced (its proposed/approved tags)? This cannot be undone.') }}
 {% endif %}
 
+{% if job['status'] in ('queued', 'running') %}
+{{ m.action_form(url_for('cancel_job', job_id=job['id']), 'cancel this job', confirm='Stop this job? Tags already committed will stay unless you revert the run afterward.') }}
+{% endif %}
+
 <p><a href="{{ url_for('jobs_list') }}">← back to jobs</a></p>
 
 {% if job['status'] in ('queued', 'running') %}

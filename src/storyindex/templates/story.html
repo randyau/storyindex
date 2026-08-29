@@ -13,13 +13,7 @@
   {% endif %}
 </p>
 
-{% if parts|length > 1 %}
-<p class="muted">parts:
-{% for p in parts %}
-  {% if p['id'] == story['id'] %}<strong>{{ p['part_index'] + 1 }}</strong>{% else %}<a href="{{ url_for('story_detail', story_id=p['id']) }}">{{ p['part_index'] + 1 }}</a>{% endif %}
-{% endfor %}
-</p>
-{% endif %}
+{{ m.chapter_nav(story, parts) }}
 
 <h3>tags</h3>
 <p>
@@ -64,6 +58,8 @@
 {% endif %}
 
 <div class="story-body">{{ story['body_text'] }}</div>
+
+{{ m.chapter_nav(story, parts) }}
 
 {% if more_by_author %}
 <h3>more by {{ story['author'] }}</h3>

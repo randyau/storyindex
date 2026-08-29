@@ -391,6 +391,20 @@ def revert_job(job_id: int):
     return redirect(url_for("job_detail", job_id=job_id))
 
 
+@app.route("/jobs/<int:job_id>/cancel", methods=["POST"])
+def cancel_job(job_id: int):
+    conn = get_db()
+    pid = db.cancel_job(conn, job_id, _now())
+    conn.commit()
+    if pid is not None:
+        import signal
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    return redirect(url_for("job_detail", job_id=job_id))
+
+
 @app.route("/prompts")
 def prompts_list():
     conn = get_db()

@@ -16,7 +16,12 @@ from storyindex.signature import StorySignature
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
-MIN_TAGS = 1
+# 0, not 1: a prompt can legitimately scope itself to a facet that's absent
+# from a given story (e.g. a setting/clothing/ethnicity pass on a story
+# that specifies none of those) - forcing a minimum of one tag would
+# pressure the model into padding with something that doesn't belong
+# rather than truthfully returning nothing for that facet.
+MIN_TAGS = 0
 MAX_TAGS = 20
 
 
@@ -50,6 +55,14 @@ def _normalize_tags(raw_tags: list) -> list[str]:
         if not isinstance(tag, str):
             continue
         t = tag.strip().lower()
+        # A prompt that groups its example tags under category headers (e.g.
+        # "category: example") can get echoed back verbatim by a model,
+        # especially on long inputs where instructions further up the
+        # prompt lose their grip. No prompt asks for a colon inside a tag,
+        # so take whatever follows the last one as the intended tag rather
+        # than dropping the whole thing.
+        if ":" in t:
+            t = t.rsplit(":", 1)[1].strip()
         if not t or t in seen:
             continue
         seen.add(t)

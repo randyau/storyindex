@@ -34,6 +34,24 @@ def test_reap_stale_jobs_leaves_done_and_queued_alone(conn):
     assert db.get_job(conn, queued_id)["status"] == "queued"
 
 
+def test_reap_stale_jobs_leaves_a_still_alive_detached_job_running(conn):
+    # Job subprocesses are detached (start_new_session=True) precisely so
+    # they survive an app restart - reap_stale_jobs must not treat "the
+    # app just started" as proof the job died, or a real multi-hour
+    # extraction run gets wrongly marked failed every time the app
+    # restarts while it's still working.
+    now = "2026-01-01T00:00:00Z"
+    job_id = db.create_job(conn, "extract", now)
+    db.mark_job_running(conn, job_id, now, pid=os.getpid())
+    conn.commit()
+
+    reaped = db.reap_stale_jobs(conn, now)
+    conn.commit()
+
+    assert reaped == []
+    assert db.get_job(conn, job_id)["status"] == "running"
+
+
 def test_reap_dead_pid_jobs_only_touches_dead_pids(conn):
     now = "2026-01-01T00:00:00Z"
     alive_job = db.create_job(conn, "extract", now)

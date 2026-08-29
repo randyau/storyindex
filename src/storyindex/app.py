@@ -61,7 +61,7 @@ def index():
     page = max(request.args.get("page", 1, type=int), 1)
     offset = (page - 1) * PAGE_SIZE
     stories = (
-        db.search_stories(conn, q, limit=PAGE_SIZE, offset=offset)
+        db.search_stories_fts(conn, q, limit=PAGE_SIZE, offset=offset)
         if q
         else db.list_stories(conn, limit=PAGE_SIZE, offset=offset)
     )

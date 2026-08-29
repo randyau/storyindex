@@ -8,6 +8,7 @@ somewhere to land without a schema migration.
 
 from __future__ import annotations
 
+import html
 import sqlite3
 from pathlib import Path
 
@@ -70,13 +71,103 @@ CREATE TABLE IF NOT EXISTS story_site_tags (
     code        TEXT NOT NULL REFERENCES site_tags(code),
     PRIMARY KEY (story_id, code)
 );
+
+-- Versioned, saved-for-reuse prompt library. Every save is a new row
+-- (never edited in place) so a job run against prompt #7 stays
+-- reproducible even after the text is tweaked into #8.
+CREATE TABLE IF NOT EXISTS prompts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    based_on_id INTEGER REFERENCES prompts(id),
+    created_at  TEXT NOT NULL
+);
+
+-- A tagging/clustering/sync run. First-class so its output (tag_candidates
+-- / story_tags rows tagged with this job_id) can be monitored while
+-- running and reverted as a unit later.
+CREATE TABLE IF NOT EXISTS jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    type        TEXT NOT NULL CHECK (type IN ('extract', 'cluster', 'sync')),
+    status      TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'done', 'failed', 'cancelled')),
+    prompt_id   INTEGER REFERENCES prompts(id),
+    model       TEXT,
+    scope       TEXT,
+    total       INTEGER NOT NULL DEFAULT 0,
+    done        INTEGER NOT NULL DEFAULT 0,
+    failed      INTEGER NOT NULL DEFAULT 0,
+    pid         INTEGER,
+    error       TEXT,
+    created_at  TEXT NOT NULL,
+    started_at  TEXT,
+    finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 """
+
+# FTS5 external-content index over stories, created lazily (see _ensure_fts)
+# so a freshly-added table on an existing DB gets backfilled once via
+# 'rebuild' instead of only covering rows inserted from here on.
+FTS_SCHEMA = """
+CREATE VIRTUAL TABLE stories_fts USING fts5(
+    title, author, body_text, content='stories', content_rowid='rowid'
+);
+
+CREATE TRIGGER stories_ai AFTER INSERT ON stories BEGIN
+    INSERT INTO stories_fts(rowid, title, author, body_text)
+    VALUES (new.rowid, new.title, new.author, new.body_text);
+END;
+
+CREATE TRIGGER stories_ad AFTER DELETE ON stories BEGIN
+    INSERT INTO stories_fts(stories_fts, rowid, title, author, body_text)
+    VALUES ('delete', old.rowid, old.title, old.author, old.body_text);
+END;
+
+CREATE TRIGGER stories_au AFTER UPDATE ON stories BEGIN
+    INSERT INTO stories_fts(stories_fts, rowid, title, author, body_text)
+    VALUES ('delete', old.rowid, old.title, old.author, old.body_text);
+    INSERT INTO stories_fts(rowid, title, author, body_text)
+    VALUES (new.rowid, new.title, new.author, new.body_text);
+END;
+"""
+
+# Additive columns on tables that predate this schema revision. No
+# migration framework for a single local sqlite file — just guard each
+# ALTER TABLE so re-running against an already-migrated DB is a no-op.
+_ADDITIVE_COLUMNS = [
+    ("tag_candidates", "job_id", "INTEGER REFERENCES jobs(id)"),
+    ("story_tags", "job_id", "INTEGER REFERENCES jobs(id)"),
+    ("stories", "status", "TEXT NOT NULL DEFAULT 'active'"),
+    ("stories", "removed_at", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, col, coldef in _ADDITIVE_COLUMNS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
+
+
+def _ensure_fts(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='stories_fts'"
+    ).fetchone()
+    if row is None:
+        conn.executescript(FTS_SCHEMA)
+        conn.execute("INSERT INTO stories_fts(stories_fts) VALUES ('rebuild')")
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
+    _ensure_fts(conn)
+    conn.commit()
     return conn
 
 
@@ -355,7 +446,7 @@ def search_stories(
         """
         SELECT id, group_id, part_index, title, author
         FROM stories
-        WHERE title LIKE ? OR author LIKE ?
+        WHERE (title LIKE ? OR author LIKE ?) AND status = 'active'
         ORDER BY title ASC
         LIMIT ? OFFSET ?
         """,
@@ -369,11 +460,70 @@ def list_stories(conn: sqlite3.Connection, limit: int = 100, offset: int = 0) ->
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, group_id, part_index, title, author FROM stories "
-        "ORDER BY title ASC LIMIT ? OFFSET ?",
+        "WHERE status = 'active' ORDER BY title ASC LIMIT ? OFFSET ?",
         (limit, offset),
     ).fetchall()
     conn.row_factory = None
     return rows
+
+
+def search_stories_fts(
+    conn: sqlite3.Connection, query: str, limit: int = 50, offset: int = 0
+) -> list[dict]:
+    """Full-text search over title/author/body via the stories_fts index.
+    Returns plain dicts (not sqlite3.Row) since each includes a synthesized
+    snippet column alongside the joined story fields."""
+    # FTS5 query syntax treats bare punctuation specially; a plain keyword
+    # search should never 500 on a stray quote/paren, so quote each term.
+    terms = query.split()
+    if not terms:
+        return []
+    match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
+
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.group_id, s.part_index, s.title, s.author,
+                   snippet(stories_fts, 2, '\x01', '\x02', '…', 12) AS snippet
+            FROM stories_fts
+            JOIN stories s ON s.rowid = stories_fts.rowid
+            WHERE stories_fts MATCH ? AND s.status = 'active'
+            ORDER BY rank
+            LIMIT ? OFFSET ?
+            """,
+            (match_expr, limit, offset),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # malformed FTS5 query (e.g. a lone operator-like token) - no results
+        # rather than a 500 for what's ultimately just a search box.
+        rows = []
+    conn.row_factory = None
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        # snippet() interleaves our \x01/\x02 markers with raw story text;
+        # escape everything first, then turn only our own markers into
+        # <mark> tags, so raw story content can never inject HTML.
+        escaped = html.escape(d["snippet"])
+        d["snippet"] = escaped.replace("\x01", "<mark>").replace("\x02", "</mark>")
+        results.append(d)
+    return results
+
+
+def set_story_status(conn: sqlite3.Connection, story_id: str, status: str) -> None:
+    removed_at = _now_iso() if status == "removed" else None
+    conn.execute(
+        "UPDATE stories SET status = ?, removed_at = ? WHERE id = ?",
+        (status, removed_at, story_id),
+    )
+
+
+def _now_iso() -> str:
+    import datetime
+
+    return datetime.datetime.utcnow().isoformat() + "Z"
 
 
 def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> None:

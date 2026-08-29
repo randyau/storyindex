@@ -22,11 +22,20 @@ DEFAULT_HOST = "http://localhost:11434"
 # before context does, and a story that long was going to lose fidelity to
 # an LLM's attention anyway.
 _CTX_BUCKETS = [4096, 8192, 16384, 32768]
-_CHARS_PER_TOKEN = 4  # rough estimator; erring high costs a bit of unused KV-cache, erring low truncates input
+CHARS_PER_TOKEN = 4  # rough estimator; erring high costs a bit of unused KV-cache, erring low truncates input
+# Public so callers building a prompt (classify.build_prompt) can pre-
+# truncate oversized input to fit, rather than silently exceeding this and
+# letting Ollama truncate the raw token stream instead - which cuts from
+# whichever end produces the newest tokens, and for a prompt that's
+# instructions-then-content, that's the content's tail, not a clean
+# no-op. For a prompt that's content-then-instructions, or where the
+# content is what's oversized, the caller needs this number to truncate
+# in a way that keeps the instructions intact.
+MAX_CTX_TOKENS = _CTX_BUCKETS[-1]
 
 
 def _estimate_num_ctx(prompt: str) -> int:
-    est_tokens = len(prompt) // _CHARS_PER_TOKEN
+    est_tokens = len(prompt) // CHARS_PER_TOKEN
     # Leave headroom for the model's own output tokens on top of the prompt.
     needed = est_tokens + 512
     for bucket in _CTX_BUCKETS:

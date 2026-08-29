@@ -521,9 +521,21 @@ def count_prompts(conn: sqlite3.Connection, q: str | None = None) -> int:
 
 
 def random_stories(conn: sqlite3.Connection, n: int) -> list[sqlite3.Row]:
+    """`ORDER BY RANDOM()` directly on `stories` would sort every active
+    row - id through body_text - through a temp b-tree just to keep n of
+    them, meaning a full-table scan and sort that drags every story's
+    inline body text through memory. Picking ids first (touching only the
+    small `stories` primary-key index) and fetching full rows for just
+    those n avoids that entirely."""
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT * FROM stories WHERE status = 'active' ORDER BY RANDOM() LIMIT ?", (n,)
+        """
+        WITH picked AS (
+            SELECT id FROM stories WHERE status = 'active' ORDER BY RANDOM() LIMIT ?
+        )
+        SELECT s.* FROM stories s JOIN picked ON picked.id = s.id
+        """,
+        (n,),
     ).fetchall()
     conn.row_factory = None
     return rows
@@ -868,36 +880,6 @@ def tags_for_story(conn: sqlite3.Connection, story_id: str) -> list[sqlite3.Row]
     return rows
 
 
-def search_stories(
-    conn: sqlite3.Connection, query: str, limit: int = 100, offset: int = 0
-) -> list[sqlite3.Row]:
-    conn.row_factory = sqlite3.Row
-    like = f"%{query}%"
-    rows = conn.execute(
-        """
-        SELECT id, group_id, part_index, title, author
-        FROM stories
-        WHERE (title LIKE ? OR author LIKE ?) AND status = 'active'
-        ORDER BY title ASC
-        LIMIT ? OFFSET ?
-        """,
-        (like, like, limit, offset),
-    ).fetchall()
-    conn.row_factory = None
-    return rows
-
-
-def list_stories(conn: sqlite3.Connection, limit: int = 100, offset: int = 0) -> list[sqlite3.Row]:
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT id, group_id, part_index, title, author FROM stories "
-        "WHERE status = 'active' ORDER BY title ASC LIMIT ? OFFSET ?",
-        (limit, offset),
-    ).fetchall()
-    conn.row_factory = None
-    return rows
-
-
 def search_stories_fts(
     conn: sqlite3.Connection, query: str, limit: int = 50, offset: int = 0
 ) -> list[dict]:
@@ -990,8 +972,8 @@ def search_stories(
     """Browse/search combining an optional keyword search with tag
     intersection (must have every include tag) and exclusion (must have
     none of the exclude tags) - e.g. "battle of wits" AND NOT "sherlock
-    holmes". Superset of search_stories_fts/list_stories; those stay as
-    simpler standalone helpers since they're independently useful/tested.
+    holmes". Superset of search_stories_fts, which stays as a simpler
+    standalone helper since it's independently useful/tested.
 
     One row per *story* (group_id), not per chapter file: a multi-part
     story used to show up as N separate, independent-looking listing rows,
@@ -1314,21 +1296,28 @@ def stories_pending_review(
         (*params, limit, offset),
     ).fetchall()
 
-    result = []
-    for s in story_rows:
+    # One query for every pending tag across the whole page, instead of a
+    # separate round trip per story (up to `limit` extra queries) - the
+    # story/tag pairing is then just a dict grouping in Python.
+    story_ids = [s["id"] for s in story_rows]
+    tags_by_story: dict[str, list] = {sid: [] for sid in story_ids}
+    if story_ids:
+        placeholders = ",".join("?" for _ in story_ids)
         tag_rows = conn.execute(
             f"""
-            SELECT t.id, t.name
+            SELECT st.story_id, t.id, t.name
             FROM tags t
             JOIN story_tags st ON st.tag_id = t.id
-            WHERE st.story_id = ? AND st.source = 'model' {job_clause}
+            WHERE st.story_id IN ({placeholders}) AND st.source = 'model' {job_clause}
             ORDER BY t.name ASC
             """,
-            (s["id"], *params),
+            (*story_ids, *params),
         ).fetchall()
-        result.append({"story": s, "tags": tag_rows})
+        for row in tag_rows:
+            tags_by_story[row["story_id"]].append(row)
+
     conn.row_factory = None
-    return result
+    return [{"story": s, "tags": tags_by_story[s["id"]]} for s in story_rows]
 
 
 def approve_all_story_tags(conn: sqlite3.Connection, story_id: str) -> None:

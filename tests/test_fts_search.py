@@ -99,3 +99,23 @@ def test_search_stories_combines_keyword_and_tags(conn, make_sig):
     results = db.search_stories(conn, query="dragon", include_tag_ids=[hoarding_id])
     assert {r["id"] for r in results} == {"s1"}
     assert "dragon" in results[0]["snippet"].lower()
+
+
+def test_search_stories_falls_back_to_part_zero_title(conn, make_sig):
+    # Some sites only print a title on a multi-chapter story's first page;
+    # later parts land in the DB with title == "". Browsing should show
+    # (and sort) those under the story's real title, not blank.
+    part0 = make_sig("g1", title="The Long Saga")
+    part0.group_id = "g1"
+    part0.part_index = 0
+    db.upsert_story(conn, part0)
+
+    part1 = make_sig("g1-p2", title="")
+    part1.group_id = "g1"
+    part1.part_index = 1
+    db.upsert_story(conn, part1)
+    conn.commit()
+
+    results = db.search_stories(conn)
+    by_id = {r["id"]: r for r in results}
+    assert by_id["g1-p2"]["title"] == "The Long Saga"

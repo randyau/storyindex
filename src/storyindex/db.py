@@ -908,26 +908,40 @@ def search_stories(
     intersection (must have every include tag) and exclusion (must have
     none of the exclude tags) - e.g. "battle of wits" AND NOT "sherlock
     holmes". Superset of search_stories_fts/list_stories; those stay as
-    simpler standalone helpers since they're independently useful/tested."""
+    simpler standalone helpers since they're independently useful/tested.
+
+    Some multi-chapter stories only carry a title on their first part's
+    page (later chapter pages don't repeat it), leaving s.title blank for
+    every part after that - blank both looks broken (an empty link) and,
+    worse, sorts first under ORDER BY title, so every untitled part across
+    the whole library used to pile up on page 1. effective_title falls
+    back to part 0's title (via a self-join on group_id) so those parts
+    display and sort under their story's real title instead."""
     include_tag_ids = include_tag_ids or []
     exclude_tag_ids = exclude_tag_ids or []
     params: list = []
+    title_expr = "COALESCE(NULLIF(TRIM(s.title), ''), NULLIF(TRIM(g.title), ''), '(untitled)')"
 
     if query.strip():
         terms = query.split()
         match_expr = " ".join('"' + t.replace('"', '""') + '"' for t in terms)
-        sql = """
-            SELECT s.id, s.group_id, s.part_index, s.title, s.author,
+        sql = f"""
+            SELECT s.id, s.group_id, s.part_index, {title_expr} AS title, s.author,
                    snippet(stories_fts, 2, '\x01', '\x02', '…', 12) AS snippet
             FROM stories_fts
             JOIN stories s ON s.rowid = stories_fts.rowid
+            LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
             WHERE stories_fts MATCH ? AND s.status = 'active'
         """
         params.append(match_expr)
         order_by = "ORDER BY rank"
     else:
-        sql = "SELECT s.id, s.group_id, s.part_index, s.title, s.author, NULL AS snippet FROM stories s WHERE s.status = 'active'"
-        order_by = "ORDER BY s.title ASC"
+        sql = (
+            f"SELECT s.id, s.group_id, s.part_index, {title_expr} AS title, s.author, NULL AS snippet "
+            "FROM stories s LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0 "
+            "WHERE s.status = 'active'"
+        )
+        order_by = f"ORDER BY {title_expr} ASC"
 
     for tag_id in include_tag_ids:
         sql += " AND s.id IN (SELECT story_id FROM story_tags WHERE tag_id = ?)"

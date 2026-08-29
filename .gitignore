@@ -42,6 +42,13 @@ build/
 .env
 .env.*
 
+# Scratch space for pulling out specific content (story text, tag
+# examples, prompt output) into a file for review — e.g. sharing a
+# handful of stories/tags with a client or checking tagging quality by
+# eye. Never committed: whatever ends up here can include real library
+# content and shouldn't be assumed safe to publish.
+review/
+
 # Editor / OS cruft
 .vscode/
 .idea/

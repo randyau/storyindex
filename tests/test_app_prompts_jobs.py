@@ -193,3 +193,38 @@ def test_job_status_json_endpoint(tmp_path):
     r = client.get(f"/jobs/{job_id}/status.json")
     assert r.status_code == 200
     assert r.get_json()["status"] == "queued"
+
+
+def test_finished_extract_job_points_to_clustering_not_review(tmp_path):
+    # story_tags.job_id is set by whichever cluster job links a tag, never
+    # by the extract job that only wrote tag_candidates - a "review the
+    # tags this job proposed" link keyed on the extract job's id would
+    # always be empty. The done page should point at clustering instead.
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
+    db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=1)
+    db.set_job_total(conn, job_id, 1)
+    db.increment_job_progress(conn, job_id, done=1)
+    db.mark_job_done(conn, job_id, "2026-01-01T00:00:00Z")
+    conn.commit()
+    conn.close()
+
+    client = _client(dbpath)
+    body = client.get(f"/jobs/{job_id}").get_data(as_text=True)
+    assert f"/review?job_id={job_id}" not in body
+    assert "start a clustering pass" in body
+
+
+def test_finished_cluster_job_links_to_its_review_queue(tmp_path):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "cluster", "2026-01-01T00:00:00Z")
+    db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=1)
+    db.mark_job_done(conn, job_id, "2026-01-01T00:00:00Z")
+    conn.commit()
+    conn.close()
+
+    client = _client(dbpath)
+    body = client.get(f"/jobs/{job_id}").get_data(as_text=True)
+    assert f"/review?job_id={job_id}" in body

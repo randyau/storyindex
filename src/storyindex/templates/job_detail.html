@@ -27,7 +27,12 @@
 {% endif %}
 
 {% if job['status'] == 'done' and job['type'] == 'extract' and not job['reverted_at'] %}
-<p><a href="{{ url_for('review_queue', job_id=job['id']) }}">review the tags this job proposed →</a></p>
+<p class="muted">this proposed {{ job['done'] }} stories' worth of candidate tags, but they're not visible on any story
+yet — <a href="{{ url_for('jobs_list') }}">start a clustering pass</a> to fold them into real tags.</p>
+{% endif %}
+
+{% if job['status'] == 'done' and job['type'] == 'cluster' and not job['reverted_at'] %}
+<p><a href="{{ url_for('review_queue', job_id=job['id']) }}">review the tags this run applied →</a></p>
 {% endif %}
 
 {% if job['status'] == 'done' and not job['reverted_at'] %}

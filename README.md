@@ -35,7 +35,7 @@ Ollama server on `localhost`.
 ## Install
 
 ```bash
-pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 ## Quick start
@@ -46,7 +46,7 @@ pip install -e ".[dev]"
 #    originally built around, if you're pulling from a live site).
 
 # 2. Launch the web app.
-python -m storyindex.app --db mylibrary.sqlite
+uv run python -m storyindex.app --db mylibrary.sqlite
 
 # 3. Open http://localhost:8765/ and use the "sync a library from disk"
 #    form under /jobs to point it at your folder — no code required for a
@@ -96,7 +96,7 @@ crawl (external, e.g. wget)          -- never part of this repo
 ## Testing
 
 ```bash
-python -m pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 Tests use a temp SQLite file per test and never call a real Ollama server —

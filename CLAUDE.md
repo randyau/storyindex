@@ -25,7 +25,7 @@ what the project does and how to run it.
 ## Working conventions established in this project
 
 - **TDD, and commit as you go.** Write/extend a test alongside (or before)
-  each behavior change, run `python -m pytest tests/ -q` before committing,
+  each behavior change, run `uv run pytest tests/ -q` before committing,
   and keep the suite green at every commit — don't batch a large amount of
   unverified work into one commit.
 - **Be token-efficient during a work chunk.** Don't narrate step-by-step
@@ -82,6 +82,21 @@ what the project does and how to run it.
 - **Don't add feature flags, config toggles, or abstractions "for later."**
   This is a single-user local tool; match the existing minimal style rather
   than generalizing preemptively.
+- **Use `uv`, not bare `pip`/`python`.** This repo has no committed
+  virtualenv or lockfile workflow beyond what `uv` manages, so drive
+  everything through it rather than a manually-activated venv:
+  - `uv sync --extra dev` — create/update `.venv` from `pyproject.toml`
+    (installs `pytest` too via the `dev` extra).
+  - `uv run pytest tests/ -q` — run the suite (equivalent to the
+    `python -m pytest tests/ -q` used elsewhere in this doc/README).
+  - `uv run python -m storyindex.app --db mylibrary.sqlite` — launch the
+    web app.
+  - `uv add <package>` / `uv remove <package>` — change dependencies;
+    this edits `pyproject.toml` directly, so don't hand-edit
+    `dependencies`/`optional-dependencies` there instead.
+  Don't reach for `pip install`, `python -m venv`, or a system Python
+  interpreter — `uv run`/`uv sync` keep the environment reproducible from
+  `pyproject.toml` alone.
 
 ## Where things live
 

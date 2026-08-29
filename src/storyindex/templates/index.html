@@ -6,6 +6,10 @@
   <input type="submit" value="search">
 </form>
 
+{% if pending_review %}
+<p class="muted"><a href="{{ url_for('review_queue') }}">{{ pending_review }} stor{{ 'y' if pending_review == 1 else 'ies' }} with tags awaiting review</a></p>
+{% endif %}
+
 <h2>tags</h2>
 <p>
 {% for tag in tags %}
@@ -27,4 +31,10 @@
   <li class="muted">no stories.</li>
 {% endfor %}
 </ul>
+
+<p class="muted">
+{% if page > 1 %}<a href="{{ url_for('index', q=q, page=page-1) }}">← prev</a>{% endif %}
+{% if page > 1 and has_next %} · {% endif %}
+{% if has_next %}<a href="{{ url_for('index', q=q, page=page+1) }}">next →</a>{% endif %}
+</p>
 {% endblock %}

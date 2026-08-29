@@ -346,7 +346,9 @@ def tags_for_story(conn: sqlite3.Connection, story_id: str) -> list[sqlite3.Row]
     return rows
 
 
-def search_stories(conn: sqlite3.Connection, query: str, limit: int = 100) -> list[sqlite3.Row]:
+def search_stories(
+    conn: sqlite3.Connection, query: str, limit: int = 100, offset: int = 0
+) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
     like = f"%{query}%"
     rows = conn.execute(
@@ -355,9 +357,9 @@ def search_stories(conn: sqlite3.Connection, query: str, limit: int = 100) -> li
         FROM stories
         WHERE title LIKE ? OR author LIKE ?
         ORDER BY title ASC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (like, like, limit),
+        (like, like, limit, offset),
     ).fetchall()
     conn.row_factory = None
     return rows
@@ -401,6 +403,73 @@ def set_story_tag_source(conn: sqlite3.Connection, story_id: str, tag_id: int, s
     conn.execute(
         "UPDATE story_tags SET source = ? WHERE story_id = ? AND tag_id = ?",
         (source, story_id, tag_id),
+    )
+
+
+def list_tag_names(conn: sqlite3.Connection) -> list[str]:
+    """For the add-tag autocomplete — steers humans toward reusing an
+    existing tag instead of minting near-duplicates the clustering pass
+    would otherwise have to fold back together."""
+    rows = conn.execute("SELECT name FROM tags ORDER BY name ASC").fetchall()
+    return [r[0] for r in rows]
+
+
+def count_pending_review(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(DISTINCT story_id) FROM story_tags WHERE source = 'model'
+        """
+    ).fetchone()
+    return row[0]
+
+
+def stories_pending_review(
+    conn: sqlite3.Connection, limit: int = 25, offset: int = 0
+) -> list[dict]:
+    """Stories that have at least one model-proposed tag still awaiting
+    human approval, each with just those pending tags attached — the
+    review-queue workflow so a human doesn't have to hunt through browse/
+    search to find what still needs a look."""
+    conn.row_factory = sqlite3.Row
+    story_rows = conn.execute(
+        """
+        SELECT DISTINCT s.id, s.title, s.author
+        FROM stories s
+        JOIN story_tags st ON st.story_id = s.id AND st.source = 'model'
+        ORDER BY s.title ASC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+
+    result = []
+    for s in story_rows:
+        tag_rows = conn.execute(
+            """
+            SELECT t.id, t.name
+            FROM tags t
+            JOIN story_tags st ON st.tag_id = t.id
+            WHERE st.story_id = ? AND st.source = 'model'
+            ORDER BY t.name ASC
+            """,
+            (s["id"],),
+        ).fetchall()
+        result.append({"story": s, "tags": tag_rows})
+    conn.row_factory = None
+    return result
+
+
+def approve_all_story_tags(conn: sqlite3.Connection, story_id: str) -> None:
+    conn.execute(
+        "UPDATE story_tags SET source = 'human' WHERE story_id = ? AND source = 'model'",
+        (story_id,),
+    )
+
+
+def reject_all_story_tags(conn: sqlite3.Connection, story_id: str) -> None:
+    conn.execute(
+        "DELETE FROM story_tags WHERE story_id = ? AND source = 'model'",
+        (story_id,),
     )
 
 

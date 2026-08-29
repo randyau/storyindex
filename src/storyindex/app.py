@@ -51,13 +51,31 @@ def _combined_tag_cloud(conn: sqlite3.Connection) -> list[dict]:
     return combined
 
 
+PAGE_SIZE = 50
+
+
 @app.route("/")
 def index():
     conn = get_db()
     q = request.args.get("q", "").strip()
-    stories = db.search_stories(conn, q) if q else db.list_stories(conn, limit=50)
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    stories = (
+        db.search_stories(conn, q, limit=PAGE_SIZE, offset=offset)
+        if q
+        else db.list_stories(conn, limit=PAGE_SIZE, offset=offset)
+    )
     tags = _combined_tag_cloud(conn)
-    return render_template("index.html", stories=stories, tags=tags, q=q)
+    pending_review = db.count_pending_review(conn)
+    return render_template(
+        "index.html",
+        stories=stories,
+        tags=tags,
+        q=q,
+        page=page,
+        has_next=len(stories) == PAGE_SIZE,
+        pending_review=pending_review,
+    )
 
 
 @app.route("/tag/<int:tag_id>")
@@ -89,8 +107,10 @@ def story_detail(story_id: str):
     parts = db.get_group_parts(conn, story["group_id"])
     tags = db.tags_for_story(conn, story_id)
     site_tags = db.site_tags_for_story(conn, story_id)
+    tag_names = db.list_tag_names(conn)
     return render_template(
-        "story.html", story=story, parts=parts, tags=tags, site_tags=site_tags
+        "story.html",
+        story=story, parts=parts, tags=tags, site_tags=site_tags, tag_names=tag_names,
     )
 
 
@@ -118,6 +138,36 @@ def approve_tag(story_id: str, tag_id: int):
     db.set_story_tag_source(conn, story_id, tag_id, "human")
     conn.commit()
     return redirect(url_for("story_detail", story_id=story_id))
+
+
+@app.route("/story/<story_id>/tags/approve-all", methods=["POST"])
+def approve_all_tags(story_id: str):
+    conn = get_db()
+    db.approve_all_story_tags(conn, story_id)
+    conn.commit()
+    return redirect(request.form.get("next") or url_for("story_detail", story_id=story_id))
+
+
+@app.route("/story/<story_id>/tags/reject-all", methods=["POST"])
+def reject_all_tags(story_id: str):
+    conn = get_db()
+    db.reject_all_story_tags(conn, story_id)
+    conn.commit()
+    return redirect(request.form.get("next") or url_for("story_detail", story_id=story_id))
+
+
+@app.route("/review")
+def review_queue():
+    conn = get_db()
+    page = max(request.args.get("page", 1, type=int), 1)
+    offset = (page - 1) * PAGE_SIZE
+    items = db.stories_pending_review(conn, limit=PAGE_SIZE, offset=offset)
+    total = db.count_pending_review(conn)
+    return render_template(
+        "review.html",
+        items=items, page=page, total=total,
+        has_next=offset + len(items) < total,
+    )
 
 
 @app.route("/tags")

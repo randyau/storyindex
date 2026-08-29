@@ -32,9 +32,27 @@
 {% endfor %}
 </p>
 <form method="post" action="{{ url_for('add_tag', story_id=story['id']) }}">
-  <input type="text" name="name" placeholder="add tag...">
+  <input type="text" name="name" placeholder="add tag..." list="tag-names">
   <input type="submit" value="add">
 </form>
+<datalist id="tag-names">
+{% for name in tag_names %}
+  <option value="{{ name }}">
+{% endfor %}
+</datalist>
+
+{% set pending = tags|selectattr('source', 'equalto', 'model')|list %}
+{% if pending %}
+<p class="muted">
+  {{ pending|length }} tag{{ 's' if pending|length != 1 }} awaiting review —
+  <form method="post" action="{{ url_for('approve_all_tags', story_id=story['id']) }}" style="display:inline">
+    <button>approve all</button>
+  </form>
+  <form method="post" action="{{ url_for('reject_all_tags', story_id=story['id']) }}" style="display:inline">
+    <button>reject all</button>
+  </form>
+</p>
+{% endif %}
 
 <div class="story-body">{{ story['body_text'] }}</div>
 {% endblock %}

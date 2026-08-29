@@ -1,6 +1,7 @@
 # Crawler output — huge, and the whole point is it never lives in the repo
 archive/
 wget.log
+*.log
 
 # Site-specific adapters (named site_<label>.py, e.g. site_a.py). These can
 # encode enough of a source site's real markup/structure to fingerprint it,

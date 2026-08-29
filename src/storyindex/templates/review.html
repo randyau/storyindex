@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}review queue — storyindex{% endblock %}
+{% block content %}
+<h2>review queue</h2>
+<p class="muted">
+{{ total }} stor{{ 'y' if total == 1 else 'ies' }} with model-proposed tags awaiting approval.
+Approve to keep a tag (folds it into the human-confirmed set), reject to drop it.
+</p>
+
+{% for item in items %}
+<div class="review-item">
+  <h3><a href="{{ url_for('story_detail', story_id=item['story']['id']) }}">{{ item['story']['title'] }}</a></h3>
+  <p class="muted">by {{ item['story']['author'] }}</p>
+  <p>
+  {% for t in item['tags'] %}
+    <span class="tag-pill">
+      {{ t['name'] }}
+      <form method="post" action="{{ url_for('approve_tag', story_id=item['story']['id'], tag_id=t['id']) }}" style="display:inline"><button title="approve">✓</button></form>
+      <form method="post" action="{{ url_for('delete_tag', story_id=item['story']['id'], tag_id=t['id']) }}" style="display:inline"><button title="reject">✕</button></form>
+    </span>
+  {% endfor %}
+  </p>
+  <form method="post" action="{{ url_for('approve_all_tags', story_id=item['story']['id']) }}" style="display:inline">
+    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page) }}">
+    <button>approve all</button>
+  </form>
+  <form method="post" action="{{ url_for('reject_all_tags', story_id=item['story']['id']) }}" style="display:inline">
+    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page) }}">
+    <button>reject all</button>
+  </form>
+</div>
+{% else %}
+<p class="muted">nothing pending — the review queue is clear.</p>
+{% endfor %}
+
+<p class="muted">
+{% if page > 1 %}<a href="{{ url_for('review_queue', page=page-1) }}">← prev</a>{% endif %}
+{% if page > 1 and has_next %} · {% endif %}
+{% if has_next %}<a href="{{ url_for('review_queue', page=page+1) }}">next →</a>{% endif %}
+</p>
+{% endblock %}

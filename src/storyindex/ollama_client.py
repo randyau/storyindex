@@ -157,30 +157,36 @@ def start_server() -> None:
 # context windows since story bodies can run long and get truncated/
 # degraded by a short context model well before hitting any token-count
 # "limit" the extraction prompt itself imposes.
+#
+# The "instruct" entries below (7b default, 14b/32b step-ups) reflect a real
+# side-by-side pilot on ~8GB VRAM: qwen2.5:7b-instruct's tag output was
+# checked against a manual read of sample stories and matched closely, while
+# two smaller/differently-tuned ~4-7B candidates tried in the same pilot
+# either hallucinated details not in the text or missed a story's central
+# theme outright. Neither refused to classify mature content — that's not a
+# meaningful axis for picking among these three. The 14b/32b step-ups are
+# the same model family scaled up for more VRAM, not independently
+# benchmarked yet.
 RECOMMENDED_MODELS = [
     {
-        "name": "qwen2.5:14b-instruct",
+        "name": "qwen2.5:7b-instruct",
         "purpose": "extraction (default)",
-        "why": "128k context window, reliable JSON-mode output and instruction "
-               "following; a solid default on a ~16GB-VRAM GPU.",
+        "why": "128k context window; in a side-by-side pilot against a manual "
+               "read of sample stories, its tags matched most closely of the "
+               "candidates tried. Fits comfortably on an 8GB-VRAM GPU at "
+               "~8-20s/story once warm.",
+    },
+    {
+        "name": "qwen2.5:14b-instruct",
+        "purpose": "extraction (higher quality)",
+        "why": "same family as the default, scaled up - try this first if 7b's "
+               "tagging feels shallow and you have ~16GB VRAM to spare.",
     },
     {
         "name": "qwen2.5:32b-instruct",
-        "purpose": "extraction (higher quality)",
-        "why": "same 128k-context family, noticeably better judgment on nuanced "
-               "or long stories if you have ~24GB+ VRAM to run it.",
-    },
-    {
-        "name": "llama3.1:8b-instruct",
-        "purpose": "extraction (lighter)",
-        "why": "128k context, much lighter footprint - a reasonable fallback on "
-               "more limited hardware.",
-    },
-    {
-        "name": "mistral-nemo:12b-instruct",
-        "purpose": "extraction (alternative)",
-        "why": "128k context, worth trying if Qwen's tagging style doesn't fit "
-               "your taxonomy well.",
+        "purpose": "extraction (highest quality)",
+        "why": "same family again, for ~24GB+ VRAM setups wanting the best "
+               "judgment on nuanced or long stories.",
     },
     {
         "name": "nomic-embed-text",

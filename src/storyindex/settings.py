@@ -17,7 +17,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".storyindex" / "settings.json"
 DEFAULTS = {
     "theme": "dark",
     "ollama_host": DEFAULT_HOST,
-    "default_extract_model": "qwen2.5:14b-instruct",
+    "default_extract_model": "qwen2.5:7b-instruct",
     "default_embed_model": "nomic-embed-text",
 }
 

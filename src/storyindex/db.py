@@ -785,7 +785,7 @@ def stories_by_author(
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT id, group_id, title, author
+        SELECT id, group_id, title, author, part_index
         FROM stories
         WHERE author = ? AND group_id != ? AND part_index = 0 AND status = 'active'
         ORDER BY title ASC

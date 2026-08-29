@@ -14,6 +14,9 @@ def test_stories_by_author_excludes_self_and_other_authors(conn, make_sig):
     results = db.stories_by_author(conn, "Jane", exclude_group_id="s1")
     titles = [r["title"] for r in results]
     assert titles == ["Second"]
+    # part_index must be selected: story.html's "more by author" list
+    # renders it via the shared story_list macro unconditionally.
+    assert results[0]["part_index"] == 0
 
 
 def test_stories_by_author_excludes_removed(conn, make_sig):

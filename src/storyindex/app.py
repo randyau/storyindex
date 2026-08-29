@@ -289,6 +289,8 @@ def preview_prompt_on_story(story_id: str):
 @app.route("/jobs")
 def jobs_list():
     conn = get_db()
+    if db.reap_dead_pid_jobs(conn, _now()):
+        conn.commit()
     prompts = db.list_prompts(conn)
     if not prompts:
         _seed_default_prompt(conn)
@@ -441,6 +443,14 @@ def main() -> None:
     app.config["DB_PATH"] = args.db
     name = args.library_name or args.db.stem
     libraries.ensure_registered_and_active(name, str(args.db.resolve()), _libraries_path())
+
+    conn = db.connect(args.db)
+    reaped = db.reap_stale_jobs(conn, _now())
+    conn.commit()
+    conn.close()
+    if reaped:
+        print(f"recovered from an unclean shutdown: marked {len(reaped)} stuck job(s) failed: {reaped}")
+
     app.run(host=args.host, port=args.port, debug=False)
 
 

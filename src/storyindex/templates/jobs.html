@@ -2,6 +2,7 @@
 {% block title %}jobs — storyindex{% endblock %}
 {% block content %}
 <h2>jobs</h2>
+<p class="muted">jobs that get interrupted (crash, power loss) are automatically marked failed rather than left stuck "running" — already-committed work is never lost or corrupted, just whatever was mid-batch when it stopped. Sync and clustering jobs are safe to just re-run (they skip what's already done); an "untagged stories only" extraction re-run picks up where it left off too.</p>
 
 <h3>start an extraction pass</h3>
 <form method="post" action="{{ url_for('create_extract_job') }}">

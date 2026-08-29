@@ -165,6 +165,16 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    # NORMAL is the documented-safe pairing with WAL: a crash or power loss
+    # can lose the last not-yet-checkpointed transaction, but cannot corrupt
+    # the database file itself (unlike journal_mode=DELETE, where a badly
+    # timed power loss can). Combined with the job runner's periodic commits
+    # (see jobs.COMMIT_EVERY), interruption loses at most one small batch of
+    # in-flight work, never the DB as a whole.
+    conn.execute("PRAGMA synchronous = NORMAL")
+    # A job subprocess and the Flask reader can briefly contend for the
+    # single WAL writer slot; wait instead of raising "database is locked".
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.executescript(SCHEMA)
     _migrate(conn)
     _ensure_fts(conn)
@@ -499,6 +509,56 @@ def revert_job(conn: sqlite3.Connection, job_id: int, reverted_at: str) -> None:
         """
     )
     conn.execute("UPDATE jobs SET reverted_at = ? WHERE id = ?", (reverted_at, job_id))
+
+
+def reap_stale_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
+    """Called unconditionally at app startup: any job still 'running' at
+    that point cannot actually be running (this app is a single
+    supervising process; if it's starting fresh, whatever process was
+    updating that job's progress is gone - crash, kill, power loss).
+    Marks them failed with an explanatory error rather than leaving a
+    phantom "running" job with a stale pid forever. The rows/commits that
+    job already made before dying are untouched and remain valid (see
+    connect()'s WAL/synchronous note) - only the job's own status reflects
+    that it didn't finish. Returns the ids marked."""
+    conn.row_factory = sqlite3.Row
+    stale = conn.execute("SELECT id FROM jobs WHERE status = 'running'").fetchall()
+    conn.row_factory = None
+    for row in stale:
+        mark_job_failed(conn, row["id"], now, "interrupted (app restarted while this job was running)")
+    return [row["id"] for row in stale]
+
+
+def reap_dead_pid_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
+    """Lighter-weight check for the case where the app itself is still up
+    but a job's subprocess died without updating its own row (killed,
+    crashed). Safe to call often (e.g. on every /jobs view) - only touches
+    jobs whose recorded pid is no longer alive."""
+    import os
+
+    conn.row_factory = sqlite3.Row
+    running = conn.execute(
+        "SELECT id, pid FROM jobs WHERE status = 'running' AND pid IS NOT NULL"
+    ).fetchall()
+    conn.row_factory = None
+    reaped = []
+    for row in running:
+        if not _pid_alive(row["pid"]):
+            mark_job_failed(conn, row["id"], now, "interrupted (job process is no longer running)")
+            reaped.append(row["id"])
+    return reaped
+
+
+def _pid_alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just owned by someone else - treat as alive
+    return True
 
 
 def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:

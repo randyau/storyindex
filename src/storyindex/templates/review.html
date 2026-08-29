@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}review queue — storyindex{% endblock %}
 {% block content %}
-<h2>review queue</h2>
+<h2>review queue{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
 <p class="muted">
 {{ total }} stor{{ 'y' if total == 1 else 'ies' }} with model-proposed tags awaiting approval.
 Approve to keep a tag (folds it into the human-confirmed set), reject to drop it.
+{% if job_id %}<a href="{{ url_for('review_queue') }}">show all pending, not just this job</a>{% endif %}
 </p>
 
 {% for item in items %}
@@ -21,11 +22,11 @@ Approve to keep a tag (folds it into the human-confirmed set), reject to drop it
   {% endfor %}
   </p>
   <form method="post" action="{{ url_for('approve_all_tags', story_id=item['story']['id']) }}" style="display:inline">
-    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page) }}">
+    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page, job_id=job_id) }}">
     <button>approve all</button>
   </form>
   <form method="post" action="{{ url_for('reject_all_tags', story_id=item['story']['id']) }}" style="display:inline">
-    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page) }}">
+    <input type="hidden" name="next" value="{{ url_for('review_queue', page=page, job_id=job_id) }}">
     <button>reject all</button>
   </form>
 </div>
@@ -34,8 +35,8 @@ Approve to keep a tag (folds it into the human-confirmed set), reject to drop it
 {% endfor %}
 
 <p class="muted">
-{% if page > 1 %}<a href="{{ url_for('review_queue', page=page-1) }}">← prev</a>{% endif %}
+{% if page > 1 %}<a href="{{ url_for('review_queue', page=page-1, job_id=job_id) }}">← prev</a>{% endif %}
 {% if page > 1 and has_next %} · {% endif %}
-{% if has_next %}<a href="{{ url_for('review_queue', page=page+1) }}">next →</a>{% endif %}
+{% if has_next %}<a href="{{ url_for('review_queue', page=page+1, job_id=job_id) }}">next →</a>{% endif %}
 </p>
 {% endblock %}

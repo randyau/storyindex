@@ -37,7 +37,7 @@
 <tr>
   <td><a href="{{ url_for('job_detail', job_id=j['id']) }}">{{ j['id'] }}</a></td>
   <td>{{ j['type'] }}</td>
-  <td>{{ j['status'] }}</td>
+  <td>{{ j['status'] }}{% if j['reverted_at'] %} (reverted){% endif %}</td>
   <td>{{ j['done'] }}/{{ j['total'] }}{% if j['failed'] %} ({{ j['failed'] }} failed){% endif %}</td>
   <td>{{ j['prompt_name'] or '' }}</td>
   <td>{{ j['model'] or '' }}</td>

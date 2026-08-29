@@ -13,9 +13,17 @@
   {% if job['scope'] %}scope: {{ job['scope'] }}{% endif %}
 </p>
 {% if job['error'] %}<p style="color:#a00">error: {{ job['error'] }}</p>{% endif %}
+{% if job['reverted_at'] %}<p style="color:#a00">reverted at {{ job['reverted_at'] }} — its tags/candidates were removed.</p>{% endif %}
 
-{% if job['status'] == 'done' and job['type'] == 'extract' %}
-<p><a href="{{ url_for('review_queue') }}">review the tags this job proposed →</a></p>
+{% if job['status'] == 'done' and job['type'] == 'extract' and not job['reverted_at'] %}
+<p><a href="{{ url_for('review_queue', job_id=job['id']) }}">review the tags this job proposed →</a></p>
+{% endif %}
+
+{% if job['status'] == 'done' and not job['reverted_at'] %}
+<form method="post" action="{{ url_for('revert_job', job_id=job['id']) }}"
+      onsubmit="return confirm('Undo everything this job produced (its proposed/approved tags)? This cannot be undone.')">
+  <button>revert this run</button>
+</form>
 {% endif %}
 
 <p><a href="{{ url_for('jobs_list') }}">← back to jobs</a></p>

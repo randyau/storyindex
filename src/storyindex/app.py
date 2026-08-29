@@ -181,14 +181,24 @@ def reject_all_tags(story_id: str):
 def review_queue():
     conn = get_db()
     page = max(request.args.get("page", 1, type=int), 1)
+    job_id = request.args.get("job_id", type=int)
     offset = (page - 1) * PAGE_SIZE
-    items = db.stories_pending_review(conn, limit=PAGE_SIZE, offset=offset)
-    total = db.count_pending_review(conn)
+    items = db.stories_pending_review(conn, limit=PAGE_SIZE, offset=offset, job_id=job_id)
+    total = db.count_pending_review(conn, job_id=job_id)
+    job = db.get_job(conn, job_id) if job_id else None
     return render_template(
         "review.html",
-        items=items, page=page, total=total,
+        items=items, page=page, total=total, job_id=job_id, job=job,
         has_next=offset + len(items) < total,
     )
+
+
+@app.route("/jobs/<int:job_id>/revert", methods=["POST"])
+def revert_job(job_id: int):
+    conn = get_db()
+    db.revert_job(conn, job_id, _now())
+    conn.commit()
+    return redirect(url_for("job_detail", job_id=job_id))
 
 
 @app.route("/prompts")

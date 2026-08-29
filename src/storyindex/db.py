@@ -141,6 +141,7 @@ _ADDITIVE_COLUMNS = [
     ("story_tags", "job_id", "INTEGER REFERENCES jobs(id)"),
     ("stories", "status", "TEXT NOT NULL DEFAULT 'active'"),
     ("stories", "removed_at", "TEXT"),
+    ("jobs", "reverted_at", "TEXT"),
 ]
 
 
@@ -481,6 +482,25 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
     return row
 
 
+def revert_job(conn: sqlite3.Connection, job_id: int, reverted_at: str) -> None:
+    """Undo everything a job produced: its story_tags links and
+    tag_candidates rows, then any tag left with zero remaining links
+    (created solely by this job, now orphaned). The job row itself stays
+    (marked reverted_at) as a record that this run happened."""
+    conn.execute("DELETE FROM story_tags WHERE job_id = ?", (job_id,))
+    conn.execute("DELETE FROM tag_candidates WHERE job_id = ?", (job_id,))
+    conn.execute(
+        """
+        DELETE FROM tags WHERE id IN (
+            SELECT t.id FROM tags t
+            LEFT JOIN story_tags st ON st.tag_id = t.id
+            WHERE st.tag_id IS NULL
+        )
+        """
+    )
+    conn.execute("UPDATE jobs SET reverted_at = ? WHERE id = ?", (reverted_at, job_id))
+
+
 def list_jobs(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -695,45 +715,52 @@ def list_tag_names(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in rows]
 
 
-def count_pending_review(conn: sqlite3.Connection) -> int:
-    row = conn.execute(
-        """
-        SELECT COUNT(DISTINCT story_id) FROM story_tags WHERE source = 'model'
-        """
-    ).fetchone()
+def count_pending_review(conn: sqlite3.Connection, job_id: int | None = None) -> int:
+    if job_id is not None:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT story_id) FROM story_tags WHERE source = 'model' AND job_id = ?",
+            (job_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT story_id) FROM story_tags WHERE source = 'model'"
+        ).fetchone()
     return row[0]
 
 
 def stories_pending_review(
-    conn: sqlite3.Connection, limit: int = 25, offset: int = 0
+    conn: sqlite3.Connection, limit: int = 25, offset: int = 0, job_id: int | None = None
 ) -> list[dict]:
     """Stories that have at least one model-proposed tag still awaiting
     human approval, each with just those pending tags attached — the
     review-queue workflow so a human doesn't have to hunt through browse/
-    search to find what still needs a look."""
+    search to find what still needs a look. Filterable to one job's output
+    via job_id, to review a single run in isolation."""
     conn.row_factory = sqlite3.Row
+    job_clause = "AND st.job_id = ?" if job_id is not None else ""
+    params = (job_id,) if job_id is not None else ()
     story_rows = conn.execute(
-        """
+        f"""
         SELECT DISTINCT s.id, s.title, s.author
         FROM stories s
-        JOIN story_tags st ON st.story_id = s.id AND st.source = 'model'
+        JOIN story_tags st ON st.story_id = s.id AND st.source = 'model' {job_clause}
         ORDER BY s.title ASC
         LIMIT ? OFFSET ?
         """,
-        (limit, offset),
+        (*params, limit, offset),
     ).fetchall()
 
     result = []
     for s in story_rows:
         tag_rows = conn.execute(
-            """
+            f"""
             SELECT t.id, t.name
             FROM tags t
             JOIN story_tags st ON st.tag_id = t.id
-            WHERE st.story_id = ? AND st.source = 'model'
+            WHERE st.story_id = ? AND st.source = 'model' {job_clause}
             ORDER BY t.name ASC
             """,
-            (s["id"],),
+            (s["id"], *params),
         ).fetchall()
         result.append({"story": s, "tags": tag_rows})
     conn.row_factory = None

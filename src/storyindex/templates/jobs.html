@@ -33,10 +33,31 @@
 
 <h3>sync a library from disk</h3>
 <p class="muted">re-walks an archive folder and upserts every story page — safe to re-run, reports new/changed stories.</p>
-<form method="post" action="{{ url_for('create_sync_job') }}">
-  <label>adapter: <input type="text" name="adapter" placeholder="storyindex.adapters.site_a:SiteAAdapter" style="width:24rem"></label>
-  <label>archive root: <input type="text" name="archive_root" placeholder="archive/site-a" style="width:14rem"></label>
-  <input type="submit" value="start">
+
+<form method="post" action="{{ url_for('create_sync_job') }}" id="sync-form">
+  <input type="hidden" name="mode" id="sync-mode" value="generic">
+  <p>
+    <label><input type="radio" name="sync_mode_radio" value="generic" checked onchange="document.getElementById('sync-mode').value='generic'; document.getElementById('generic-fields').style.display=''; document.getElementById('custom-fields').style.display='none';"> no adapter needed (filename as title, optional regexes)</label><br>
+    <label><input type="radio" name="sync_mode_radio" value="custom" onchange="document.getElementById('sync-mode').value='custom'; document.getElementById('generic-fields').style.display='none'; document.getElementById('custom-fields').style.display='';"> custom SiteAdapter (power users — see docs/crawler-parser-contract.md)</label>
+  </p>
+
+  <label>archive root (a folder on this machine): <input type="text" name="archive_root" placeholder="/path/to/my-stories" style="width:24rem"></label><br>
+  <label>file pattern(s): <input type="text" name="glob" value="*.html" style="width:14rem"> <span class="muted">comma-separated, e.g. *.html,*.txt</span></label>
+
+  <div id="generic-fields">
+    <p class="muted">leave a field blank to use its default. See src/storyindex/adapters/generic_adapter.py for the full config schema (scan window, exclude globs, etc).</p>
+    <label>title regex (first capture group = title, optional): <input type="text" name="title_regex" placeholder="&lt;title&gt;(.*?)&lt;/title&gt;" style="width:24rem"></label><br>
+    <label>author regex (optional): <input type="text" name="author_regex" placeholder="by ([^\n&lt;]+)" style="width:24rem"></label><br>
+    <label>tags regex, comma-split (optional): <input type="text" name="tags_regex" placeholder="Tags: ([^\n&lt;]+)" style="width:24rem"></label><br>
+    <label>tag every story in this run with: <input type="text" name="tags" placeholder="gutenberg-import, unsorted" style="width:20rem"></label><br>
+    <label><input type="checkbox" name="strip_html"> strip HTML tags from the body (for messy/unknown markup)</label>
+  </div>
+
+  <div id="custom-fields" style="display:none">
+    <label>adapter: <input type="text" name="adapter" placeholder="storyindex.adapters.site_a:SiteAAdapter" style="width:24rem"></label>
+  </div>
+
+  <p><input type="submit" value="start"></p>
 </form>
 
 <h3>history</h3>

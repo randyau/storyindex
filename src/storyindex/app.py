@@ -376,17 +376,44 @@ def create_cluster_job():
     return redirect(url_for("job_detail", job_id=job_id))
 
 
+GENERIC_ADAPTER_SPEC = "storyindex.adapters.generic_adapter:GenericAdapter"
+
+
 @app.route("/jobs/sync", methods=["POST"])
 def create_sync_job():
     import json
 
     conn = get_db()
-    adapter = request.form.get("adapter", "").strip()
+    mode = request.form.get("mode", "generic")
     archive_root = request.form.get("archive_root", "").strip()
-    if not adapter or not archive_root:
+    glob = request.form.get("glob", "*.html").strip() or "*.html"
+    if not archive_root:
         return redirect(url_for("jobs_list"))
-    scope = json.dumps({"adapter": adapter, "archive_root": archive_root})
-    job_id = db.create_job(conn, "sync", _now(), scope=scope)
+
+    if mode == "custom":
+        adapter = request.form.get("adapter", "").strip()
+        if not adapter:
+            return redirect(url_for("jobs_list"))
+        scope = {"adapter": adapter, "archive_root": archive_root, "glob": glob}
+    else:
+        config = {}
+        title_regex = request.form.get("title_regex", "").strip()
+        author_regex = request.form.get("author_regex", "").strip()
+        tags_regex = request.form.get("tags_regex", "").strip()
+        tags = [t.strip() for t in request.form.get("tags", "").split(",") if t.strip()]
+        if title_regex:
+            config["title_regex"] = title_regex
+        if author_regex:
+            config["author_regex"] = author_regex
+        if tags_regex:
+            config["tags_regex"] = tags_regex
+        if tags:
+            config["tags"] = tags
+        if request.form.get("strip_html") == "on":
+            config["strip_html"] = True
+        scope = {"adapter": GENERIC_ADAPTER_SPEC, "archive_root": archive_root, "glob": glob, "config": config}
+
+    job_id = db.create_job(conn, "sync", _now(), scope=json.dumps(scope))
     conn.commit()
     _spawn_job(job_id)
     return redirect(url_for("job_detail", job_id=job_id))

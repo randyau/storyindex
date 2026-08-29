@@ -169,6 +169,28 @@ def _load_adapter_class(spec: str):
     return getattr(module, class_name)
 
 
+def _build_adapter(adapter_class, archive_root: Path, config: dict | None):
+    """Mirrors scripts/parse_site.py build_adapter(): pass config through
+    only if the adapter's constructor accepts a second argument."""
+    if not config:
+        return adapter_class(archive_root)
+    try:
+        return adapter_class(archive_root, config)
+    except TypeError:
+        return adapter_class(archive_root)
+
+
+def _call_extract(adapter, text: str, relpath: str):
+    """Mirrors scripts/parse_site.py call_extract(): pass relpath through
+    only if the adapter's extract() accepts a second argument."""
+    import inspect
+
+    params = inspect.signature(adapter.extract).parameters
+    if len(params) >= 2:
+        return adapter.extract(text, relpath)
+    return adapter.extract(text)
+
+
 SYNC_COMMIT_EVERY = 200
 
 
@@ -193,13 +215,19 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
             return
 
         adapter_class = _load_adapter_class(adapter_spec)
-        adapter = adapter_class(archive_root)
+        adapter = _build_adapter(adapter_class, archive_root, params.get("config"))
+        patterns = [p.strip() for p in (params.get("glob") or "*.html").split(",") if p.strip()]
 
         paths = []
-        for p in archive_root.rglob("*.html"):
-            relpath = p.relative_to(archive_root).as_posix()
-            if adapter.matches(relpath) and adapter.is_story_page(relpath):
-                paths.append(p)
+        seen: set[Path] = set()
+        for pattern in patterns:
+            for p in archive_root.rglob(pattern):
+                if p in seen:
+                    continue
+                seen.add(p)
+                relpath = p.relative_to(archive_root).as_posix()
+                if adapter.matches(relpath) and adapter.is_story_page(relpath):
+                    paths.append(p)
 
         db.set_job_total(conn, job_id, len(paths))
         db.mark_job_running(conn, job_id, _now(), os.getpid())
@@ -210,7 +238,7 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
             relpath = path.relative_to(archive_root).as_posix()
             try:
                 html_text = path.read_text(encoding="utf-8", errors="replace")
-                fields = adapter.extract(html_text)
+                fields = _call_extract(adapter, html_text, relpath)
                 group_key = adapter.group_key(relpath)
                 part_idx = adapter.part_index(relpath)
                 sig = StorySignature(

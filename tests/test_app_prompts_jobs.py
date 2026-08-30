@@ -302,27 +302,24 @@ def test_format_duration():
     assert _format_duration(90000) == "~1d 1h"
 
 
-def test_eta_seconds_scales_with_active_job_count(tmp_path):
-    from storyindex.app import _eta_seconds
+def test_extract_job_etas_sole_job_ignores_sharing(tmp_path):
+    from storyindex.app import _extract_job_etas
 
     conn = db.connect(tmp_path / "t.sqlite")
     job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
     db.set_job_total(conn, job_id, 100)
     db.increment_job_progress(conn, job_id, done=10)
-    db.record_block_timing(conn, job_id, 10.0, 10)  # 1 item/sec while it had the floor
+    db.record_block_timing(conn, job_id, 10.0, 10)  # 1 item/sec
     conn.commit()
     job = db.get_job(conn, job_id)
     conn.close()
 
-    # 90 remaining at 1 item/sec, sole job in rotation.
-    assert _eta_seconds(job, active_extract_job_count=1) == 90.0
-    # Same throughput, but sharing the scheduler with one other job halves
-    # its share of wall-clock time, so it should take roughly twice as long.
-    assert _eta_seconds(job, active_extract_job_count=2) == 180.0
+    # 90 remaining at 1 item/sec, nothing else in the rotation to share with.
+    assert _extract_job_etas([job]) == {job_id: 90.0}
 
 
-def test_eta_seconds_none_without_timing_data(tmp_path):
-    from storyindex.app import _eta_seconds
+def test_extract_job_etas_none_without_timing_data(tmp_path):
+    from storyindex.app import _extract_job_etas
 
     conn = db.connect(tmp_path / "t.sqlite")
     job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
@@ -331,7 +328,37 @@ def test_eta_seconds_none_without_timing_data(tmp_path):
     job = db.get_job(conn, job_id)
     conn.close()
 
-    assert _eta_seconds(job, active_extract_job_count=1) is None
+    assert _extract_job_etas([job]) == {job_id: None}
+
+
+def test_extract_job_etas_smaller_job_finishes_first_and_bigger_one_then_speeds_up(tmp_path):
+    # Two jobs at the same 1 item/sec rate, sharing the scheduler equally:
+    # the smaller job (10 remaining) finishes at 2x its own pace (20s,
+    # matching the old flat-N guess exactly), but the bigger job (100
+    # remaining) should NOT also be flat-multiplied by 2 for its entire
+    # remaining time (that would say 200s) - once the small job drains at
+    # 20s it stops competing, so the big job gets the whole scheduler for
+    # its last (100-10)=90s of own-work, landing at 20+90=110s, well under
+    # the naive 200s a flat-N model would have shown.
+    from storyindex.app import _extract_job_etas
+
+    conn = db.connect(tmp_path / "t.sqlite")
+    small_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
+    big_id = db.create_job(conn, "extract", "2026-01-01T00:00:01Z", scope="all")
+    db.set_job_total(conn, small_id, 10)
+    db.set_job_total(conn, big_id, 100)
+    db.record_block_timing(conn, small_id, 1.0, 1)  # 1 item/sec, 10s of own-work
+    db.record_block_timing(conn, big_id, 1.0, 1)  # 1 item/sec, 100s of own-work
+    conn.commit()
+    small = db.get_job(conn, small_id)
+    big = db.get_job(conn, big_id)
+    conn.close()
+
+    etas = _extract_job_etas([small, big])
+    assert etas[small_id] == 20.0
+    assert etas[big_id] == 110.0
+    # The two numbers shouldn't be misread as "everything done in 110s either
+    # way" nor summed to "130s total" - draining both takes exactly 110s.
 
 
 def test_job_status_json_includes_eta_once_a_block_has_completed(tmp_path):

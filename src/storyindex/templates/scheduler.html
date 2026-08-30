@@ -36,9 +36,12 @@ prefix-cache miss.</p>
 <tr><td colspan="7" class="muted">nothing queued right now.</td></tr>
 {% endfor %}
 </table>
-<p class="muted">"time left" is a rough estimate from each job's own most recent block, corrected for
-however many jobs are currently sharing the scheduler's rotation — it settles down after each job has
-completed at least one block, and moves around as jobs start/finish or the number in rotation changes.</p>
+<p class="muted">"time left" is a rough estimate from each job's own most recent block, accounting for the
+others in the rotation — the numbers are staggered by expected finish order, not each computed as if it
+had the scheduler to itself the whole time, so a smaller job's estimate finishing before a larger job's
+is what it sounds like: the larger one is expected to speed up once the smaller one drains and stops
+competing for a turn. It settles down after each job has completed at least one block, and shifts as
+jobs start/finish or the rotation changes.</p>
 
 <p><a href="{{ url_for('jobs_list') }}">← full job history</a></p>
 

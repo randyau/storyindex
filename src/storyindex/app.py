@@ -126,27 +126,57 @@ def _format_duration(seconds: float) -> str:
     return "<1m"
 
 
-def _eta_seconds(job: sqlite3.Row, active_extract_job_count: int) -> float | None:
-    """Very rough time-to-completion estimate for a running extract job,
-    from its own most recent block's throughput (db.record_block_timing).
-    None if there's no timing data yet (still on its first block) or
-    nothing left to do.
+def _extract_job_etas(active_jobs: list[sqlite3.Row]) -> dict[int, float | None]:
+    """Rough completion-time estimate for every active extract job at
+    once - has to see the whole rotation together, not one job at a time,
+    because the jobs aren't independent: they're all splitting the same
+    scheduler.
 
-    Corrected by active_extract_job_count: last_block_seconds only counts
-    time actually spent on *this* job's calls, but the scheduler
-    round-robins - while N jobs are active, each one only gets roughly a
-    1/N share of wall-clock time, so the naive remaining/rate figure would
-    understate real-world completion time by about that same factor
-    whenever more than one extract job is running at once."""
-    if not job["last_block_items"] or not job["last_block_seconds"]:
-        return None
-    remaining = job["total"] - job["done"] - job["failed"]
-    if remaining <= 0:
-        return 0.0
-    item_rate = job["last_block_items"] / job["last_block_seconds"]
-    if item_rate <= 0:
-        return None
-    return (remaining / item_rate) * max(active_extract_job_count, 1)
+    own_time[j] = remaining_j / rate_j is how long job j would take if it
+    had the scheduler to itself, from its own most recent block's
+    throughput (db.record_block_timing). A first cut at correcting for
+    sharing multiplied every job's own_time by the number of active jobs
+    - which is right for whichever job finishes first, but wrong for
+    everything after it: once the fastest-draining job completes, it stops
+    competing for a turn and the rest speed up. Flat-multiplying every
+    job's own_time by the same N overstates the slower jobs and, worse,
+    means the displayed numbers don't add up - a user glancing at "~3d"
+    and "~2d" side by side has no way to know those already double-count
+    the time they spend sharing, so summing or comparing them is
+    misleading.
+
+    Modeled instead as egalitarian processor sharing (the standard result
+    for N jobs splitting one resource equally, draining smallest-
+    remaining-work-first, each freed-up share going to whoever's left):
+    sort by own_time ascending, then each job's completion time is the
+    previous one's plus its share of the *extra* own_time beyond that,
+    split across however many jobs are still in the race at that point.
+    The fastest job's estimate comes out identical to the old flat-N
+    guess; every slower job's comes out lower and consistent with the
+    others, since it accounts for gaining a larger share once faster jobs
+    finish rather than assuming the full original N for its entire run."""
+    own_time: dict[int, float] = {}
+    for j in active_jobs:
+        if not j["last_block_items"] or not j["last_block_seconds"]:
+            continue
+        remaining = j["total"] - j["done"] - j["failed"]
+        if remaining <= 0:
+            own_time[j["id"]] = 0.0
+            continue
+        rate = j["last_block_items"] / j["last_block_seconds"]
+        if rate > 0:
+            own_time[j["id"]] = remaining / rate
+
+    etas: dict[int, float | None] = {j["id"]: None for j in active_jobs}
+    ordered = sorted(own_time.items(), key=lambda kv: kv[1])
+    n = len(ordered)
+    completed = 0.0
+    prev_t = 0.0
+    for idx, (jid, t) in enumerate(ordered):
+        completed += (n - idx) * (t - prev_t)
+        etas[jid] = completed
+        prev_t = t
+    return etas
 
 
 TAG_CLOUD_SIZE = 40
@@ -686,8 +716,8 @@ def _seed_default_prompt(conn: sqlite3.Connection) -> None:
 def _job_eta_display(conn: sqlite3.Connection, job: sqlite3.Row) -> str | None:
     if job["type"] != "extract" or job["status"] != "running":
         return None
-    active_count = len(db.list_active_extract_jobs(conn))
-    eta = _eta_seconds(job, active_count)
+    active_jobs = db.list_active_extract_jobs(conn)
+    eta = _extract_job_etas(active_jobs).get(job["id"])
     return _format_duration(eta) if eta is not None else None
 
 
@@ -732,10 +762,9 @@ def _scheduler_status() -> dict:
     alive = pid is not None and db._pid_alive(pid)
     conn = get_db()
     active_jobs = db.list_active_extract_jobs(conn)
-    active_count = len(active_jobs)
     etas = {
-        j["id"]: _format_duration(eta) if (eta := _eta_seconds(j, active_count)) is not None else None
-        for j in active_jobs
+        jid: _format_duration(eta) if eta is not None else None
+        for jid, eta in _extract_job_etas(active_jobs).items()
     }
     return {"alive": alive, "pid": pid, "active_jobs": active_jobs, "etas": etas}
 

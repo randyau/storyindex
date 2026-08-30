@@ -10,8 +10,9 @@
   <span id="job-eta-line">{% if eta %} · time left: <span class="muted">{{ eta }}</span>{% endif %}</span>
 </p>
 {% if job['type'] == 'extract' and job['status'] == 'running' %}
-<p class="muted">"time left" is a rough estimate from this job's own most recent block, corrected for
-however many extraction jobs are currently sharing the scheduler — see the <a href="{{ url_for('scheduler_status') }}">scheduler page</a> for the full rotation.</p>
+<p class="muted">"time left" is a rough estimate accounting for every other extraction job currently
+sharing the scheduler, staggered by expected finish order — not this job's own pace as if it had the
+scheduler to itself the whole time. See the <a href="{{ url_for('scheduler_status') }}">scheduler page</a> for the full rotation and how the other jobs' estimates compare.</p>
 {% endif %}
 <p class="muted">
   {% if job['prompt_name'] %}prompt: {{ job['prompt_name'] }} ·{% endif %}

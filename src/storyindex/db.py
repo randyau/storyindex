@@ -200,6 +200,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
 
 
+def _is_initialized(conn: sqlite3.Connection) -> bool:
+    """Cheap read-only check for "has schema/migrate/FTS setup already run
+    against this file?" so connect() can skip the DDL-heavy full init on
+    every call once it has. Every CREATE TABLE/INDEX IF NOT EXISTS
+    statement in SCHEMA still takes SQLite's write lock even as a no-op,
+    and get_db() calls connect() fresh on every single Flask request - left
+    unguarded, that's the app contending for the WAL writer slot against
+    job subprocesses on every page load for work that only ever needs to
+    happen once per file. Checking sqlite_master/PRAGMA table_info instead
+    is read-only, so it can't itself contend for that lock, and re-detects
+    correctly if the file was deleted and recreated mid-process (e.g. a
+    library removed and re-added at the same path)."""
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
+    }
+    if "job_errors" not in tables or "stories_fts" not in tables:
+        return False
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    return "last_block_items" in cols
+
+
 def _ensure_fts(conn: sqlite3.Connection) -> None:
     row = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='stories_fts'"
@@ -230,10 +252,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     # generous - a real deadlock/hang would still show up as a slow
     # request, not a silent wait forever.
     conn.execute("PRAGMA busy_timeout = 15000")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    _ensure_fts(conn)
-    conn.commit()
+    if not _is_initialized(conn):
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        _ensure_fts(conn)
+        conn.commit()
     return conn
 
 

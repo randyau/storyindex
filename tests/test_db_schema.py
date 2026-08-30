@@ -44,6 +44,26 @@ def test_reconnect_is_idempotent(tmp_path):
     conn2.close()
 
 
+def test_reconnect_skips_ddl_once_initialized(tmp_path, monkeypatch):
+    path = tmp_path / "reconnect2.sqlite"
+    db.connect(path).close()
+
+    # If connect() still ran SCHEMA's DDL on this second call, this
+    # deliberately-broken script would raise sqlite3.OperationalError.
+    monkeypatch.setattr(db, "SCHEMA", "THIS IS NOT VALID SQL;")
+    conn2 = db.connect(path)
+    conn2.close()
+
+
+def test_is_initialized_false_for_fresh_connection(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "bare.sqlite"
+    conn = sqlite3.connect(path)
+    assert db._is_initialized(conn) is False
+    conn.close()
+
+
 def test_connect_creates_missing_parent_directory(tmp_path):
     # library/storyindex.sqlite is the default path for the web app and
     # every scripts/*.py tool - a fresh clone won't have library/ yet, so

@@ -23,6 +23,10 @@ signatures/
 # but named explicitly since this is the intended place to put one.
 library/
 
+# scripts/backup.sh's output - real library snapshots. Doubly covered by
+# *.sqlite above, named explicitly for the same reason as library/.
+backups/
+
 # Python
 __pycache__/
 *.pyc

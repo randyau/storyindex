@@ -1,0 +1,5 @@
+{
+  "author_regex": "by ([^\\n\\[]+)",
+  "tags": ["gutenberg-demo"],
+  "scan_chars": 2000
+}

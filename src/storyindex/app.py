@@ -112,6 +112,43 @@ def _now() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    if days:
+        return f"~{days}d {hours}h"
+    if hours:
+        return f"~{hours}h {minutes}m"
+    if minutes:
+        return f"~{minutes}m"
+    return "<1m"
+
+
+def _eta_seconds(job: sqlite3.Row, active_extract_job_count: int) -> float | None:
+    """Very rough time-to-completion estimate for a running extract job,
+    from its own most recent block's throughput (db.record_block_timing).
+    None if there's no timing data yet (still on its first block) or
+    nothing left to do.
+
+    Corrected by active_extract_job_count: last_block_seconds only counts
+    time actually spent on *this* job's calls, but the scheduler
+    round-robins - while N jobs are active, each one only gets roughly a
+    1/N share of wall-clock time, so the naive remaining/rate figure would
+    understate real-world completion time by about that same factor
+    whenever more than one extract job is running at once."""
+    if not job["last_block_items"] or not job["last_block_seconds"]:
+        return None
+    remaining = job["total"] - job["done"] - job["failed"]
+    if remaining <= 0:
+        return 0.0
+    item_rate = job["last_block_items"] / job["last_block_seconds"]
+    if item_rate <= 0:
+        return None
+    return (remaining / item_rate) * max(active_extract_job_count, 1)
+
+
 TAG_CLOUD_SIZE = 40
 
 
@@ -646,6 +683,14 @@ def _seed_default_prompt(conn: sqlite3.Connection) -> None:
     db.ensure_seed_prompt(conn, "default (v1)", text, _now())
 
 
+def _job_eta_display(conn: sqlite3.Connection, job: sqlite3.Row) -> str | None:
+    if job["type"] != "extract" or job["status"] != "running":
+        return None
+    active_count = len(db.list_active_extract_jobs(conn))
+    eta = _eta_seconds(job, active_count)
+    return _format_duration(eta) if eta is not None else None
+
+
 @app.route("/jobs/<int:job_id>")
 def job_detail(job_id: int):
     conn = get_db()
@@ -653,7 +698,8 @@ def job_detail(job_id: int):
     if job is None:
         return "job not found", 404
     errors = db.list_job_errors(conn, job_id) if job["failed"] else []
-    return render_template("job_detail.html", job=job, errors=errors)
+    eta = _job_eta_display(conn, job)
+    return render_template("job_detail.html", job=job, errors=errors, eta=eta)
 
 
 @app.route("/jobs/<int:job_id>/status.json")
@@ -667,7 +713,7 @@ def job_status_json(job_id: int):
         return {"error": "not found"}, 404
     return {
         "status": job["status"], "total": job["total"], "done": job["done"],
-        "failed": job["failed"], "error": job["error"],
+        "failed": job["failed"], "error": job["error"], "eta": _job_eta_display(conn, job),
     }
 
 
@@ -686,7 +732,12 @@ def _scheduler_status() -> dict:
     alive = pid is not None and db._pid_alive(pid)
     conn = get_db()
     active_jobs = db.list_active_extract_jobs(conn)
-    return {"alive": alive, "pid": pid, "active_jobs": active_jobs}
+    active_count = len(active_jobs)
+    etas = {
+        j["id"]: _format_duration(eta) if (eta := _eta_seconds(j, active_count)) is not None else None
+        for j in active_jobs
+    }
+    return {"alive": alive, "pid": pid, "active_jobs": active_jobs, "etas": etas}
 
 
 @app.route("/scheduler")
@@ -713,7 +764,7 @@ def scheduler_status_json():
             {
                 "id": j["id"], "status": j["status"], "model": j["model"],
                 "prompt_name": j["prompt_name"], "done": j["done"],
-                "total": j["total"], "failed": j["failed"],
+                "total": j["total"], "failed": j["failed"], "eta": status["etas"][j["id"]],
             }
             for j in status["active_jobs"]
         ],

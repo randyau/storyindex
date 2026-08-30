@@ -167,6 +167,8 @@ _ADDITIVE_COLUMNS = [
     ("stories", "status", "TEXT NOT NULL DEFAULT 'active'"),
     ("stories", "removed_at", "TEXT"),
     ("jobs", "reverted_at", "TEXT"),
+    ("jobs", "last_block_seconds", "REAL"),
+    ("jobs", "last_block_items", "INTEGER"),
 ]
 
 
@@ -588,6 +590,20 @@ def increment_job_progress(conn: sqlite3.Connection, job_id: int, done: int = 0,
     conn.execute(
         "UPDATE jobs SET done = done + ?, failed = failed + ? WHERE id = ?",
         (done, failed, job_id),
+    )
+
+
+def record_block_timing(conn: sqlite3.Connection, job_id: int, seconds: float, items: int) -> None:
+    """Overwrite the job's most recent block timing - used to derive a
+    rough "time remaining" estimate from recent throughput rather than an
+    average over the job's whole (possibly days-long) history, so it
+    reacts to conditions changing (more/fewer jobs sharing the scheduler,
+    a slower story, a warm vs. cold model). See scheduler.py's per-block
+    loop for where this gets called, and app._eta_seconds for how it's
+    turned into an estimate."""
+    conn.execute(
+        "UPDATE jobs SET last_block_seconds = ?, last_block_items = ? WHERE id = ?",
+        (seconds, items, job_id),
     )
 
 

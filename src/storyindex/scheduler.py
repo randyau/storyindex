@@ -43,6 +43,12 @@ Launched as a singleton by app._ensure_scheduler_running (one instance
 system-wide, not one per job) whenever an extract job is created and no
 live scheduler is already running; exits on its own after sitting idle
 with nothing queued.
+
+Each block's wall-clock time and item count get written to the job row
+(db.record_block_timing) so the /scheduler and job-detail views can show
+a rough "time remaining" - a 40k-item backlog is a multi-day job, and a
+user staring at a bare progress counter has no way to tell "almost done"
+from "days left" without it.
 """
 
 from __future__ import annotations
@@ -130,6 +136,7 @@ def run_scheduler(db_path: Path) -> None:
                         continue
 
                     processed = 0
+                    block_started = time.time()
                     for row in block:
                         process_extract_item(
                             conn, jid, job["model"], state["prompt"]["text"], state["prompt"]["name"], row, host,
@@ -145,6 +152,14 @@ def run_scheduler(db_path: Path) -> None:
                         ).fetchone()
                         if still_active is None or still_active[0] not in ("queued", "running"):
                             break
+                    if processed:
+                        # Recorded per-job (not per-block-wall-clock) since
+                        # this only counts time actually spent on this job's
+                        # own calls - the app layer accounts separately for
+                        # time this job spends waiting its turn while other
+                        # jobs are being worked (see app._eta_seconds).
+                        db.record_block_timing(conn, jid, time.time() - block_started, processed)
+                        conn.commit()
                     state["cursor"] += processed
                 except Exception as exc:  # noqa: BLE001 - one job's bug/DB hiccup
                     # (process_extract_item already turns model-call failures

@@ -230,6 +230,30 @@ def test_scheduler_survives_one_jobs_unexpected_error(tmp_path, make_sig, monkey
     conn.close()
 
 
+def test_scheduler_records_block_timing_for_eta_estimation(tmp_path, make_sig, monkeypatch):
+    dbpath = tmp_path / "s.sqlite"
+    conn = db.connect(dbpath)
+    for i in range(5):
+        db.upsert_story(conn, make_sig(f"s{i}"))
+    p1 = db.create_prompt(conn, "p1", "text1", _now())
+    j1 = db.create_job(conn, "extract", _now(), prompt_id=p1, model="m", scope="all")
+    conn.commit()
+    conn.close()
+
+    _fast(monkeypatch, block_size=2)
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
+
+    scheduler.run_scheduler(dbpath)
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, j1)
+    conn.close()
+    assert job["status"] == "done"
+    # Last block was the final (partial) one: 5 stories, block_size=2 -> 1 item left over.
+    assert job["last_block_items"] == 1
+    assert job["last_block_seconds"] is not None and job["last_block_seconds"] >= 0
+
+
 def test_scheduler_marks_job_failed_when_prompt_missing(tmp_path, make_sig, monkeypatch):
     dbpath = tmp_path / "s.sqlite"
     conn = db.connect(dbpath)

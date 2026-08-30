@@ -1,3 +1,4 @@
+import os
 import time
 
 from storyindex import classify, db
@@ -290,6 +291,64 @@ def test_job_status_json_does_not_spawn_scheduler_when_nothing_pending(tmp_path,
     r = client.get(f"/jobs/{job_id}/status.json")
     assert r.status_code == 200
     assert calls == []
+
+
+def test_format_duration():
+    from storyindex.app import _format_duration
+
+    assert _format_duration(30) == "<1m"
+    assert _format_duration(90) == "~1m"
+    assert _format_duration(3700) == "~1h 1m"
+    assert _format_duration(90000) == "~1d 1h"
+
+
+def test_eta_seconds_scales_with_active_job_count(tmp_path):
+    from storyindex.app import _eta_seconds
+
+    conn = db.connect(tmp_path / "t.sqlite")
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
+    db.set_job_total(conn, job_id, 100)
+    db.increment_job_progress(conn, job_id, done=10)
+    db.record_block_timing(conn, job_id, 10.0, 10)  # 1 item/sec while it had the floor
+    conn.commit()
+    job = db.get_job(conn, job_id)
+    conn.close()
+
+    # 90 remaining at 1 item/sec, sole job in rotation.
+    assert _eta_seconds(job, active_extract_job_count=1) == 90.0
+    # Same throughput, but sharing the scheduler with one other job halves
+    # its share of wall-clock time, so it should take roughly twice as long.
+    assert _eta_seconds(job, active_extract_job_count=2) == 180.0
+
+
+def test_eta_seconds_none_without_timing_data(tmp_path):
+    from storyindex.app import _eta_seconds
+
+    conn = db.connect(tmp_path / "t.sqlite")
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
+    db.set_job_total(conn, job_id, 100)
+    conn.commit()
+    job = db.get_job(conn, job_id)
+    conn.close()
+
+    assert _eta_seconds(job, active_extract_job_count=1) is None
+
+
+def test_job_status_json_includes_eta_once_a_block_has_completed(tmp_path):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
+    db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=os.getpid())
+    db.set_job_total(conn, job_id, 100)
+    db.increment_job_progress(conn, job_id, done=10)
+    db.record_block_timing(conn, job_id, 10.0, 10)
+    conn.commit()
+    conn.close()
+
+    client = _client(dbpath)
+    r = client.get(f"/jobs/{job_id}/status.json")
+    assert r.status_code == 200
+    assert r.get_json()["eta"] == "~1m"
 
 
 def test_scheduler_page_shows_idle_when_nothing_queued(tmp_path):

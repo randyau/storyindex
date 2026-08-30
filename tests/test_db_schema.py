@@ -23,6 +23,16 @@ def test_additive_columns_present(conn):
     assert "job_id" in _cols(conn, "story_tags")
     assert "status" in _cols(conn, "stories")
     assert "removed_at" in _cols(conn, "stories")
+    assert "last_block_seconds" in _cols(conn, "jobs")
+    assert "last_block_items" in _cols(conn, "jobs")
+
+
+def test_record_block_timing_updates_job_row(conn):
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z")
+    db.record_block_timing(conn, job_id, 12.5, 5)
+    job = db.get_job(conn, job_id)
+    assert job["last_block_seconds"] == 12.5
+    assert job["last_block_items"] == 5
 
 
 def test_reconnect_is_idempotent(tmp_path):

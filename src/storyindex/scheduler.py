@@ -122,8 +122,20 @@ def run_scheduler(db_path: Path) -> None:
                             db.mark_job_failed(conn, jid, _now(), "job has no prompt assigned")
                             conn.commit()
                             continue
-                        stories = _scope_stories(conn, job["scope"])
-                        db.set_job_total(conn, jid, len(stories))
+                        # exclude_job_id: this branch runs both for a
+                        # genuinely new job AND for one this scheduler
+                        # process is resuming (it was left 'running' by a
+                        # prior scheduler process that died/restarted -
+                        # db.reap_dead_pid_jobs deliberately never fails
+                        # extract jobs for that, see its docstring) -
+                        # excluding stories this job_id already has
+                        # tag_candidates for makes the resume case pick up
+                        # where it left off instead of redoing finished
+                        # work. done/failed are already cumulative from any
+                        # earlier run, so total is done+failed+remaining,
+                        # not just len(remaining).
+                        stories = _scope_stories(conn, job["scope"], exclude_job_id=jid)
+                        db.set_job_total(conn, jid, job["done"] + job["failed"] + len(stories))
                         if job["status"] == "queued":
                             db.mark_job_running(conn, jid, _now(), os.getpid())
                             conn.commit()

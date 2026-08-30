@@ -16,6 +16,49 @@ def _fast(monkeypatch, block_size=None):
     monkeypatch.setattr(scheduler, "POLL_INTERVAL_SECONDS", 0.01)
 
 
+def test_scheduler_resumes_a_running_job_left_by_a_dead_scheduler_process(tmp_path, make_sig, monkeypatch):
+    # Simulates exactly what happens when the scheduler process is
+    # killed/crashes mid-run and a fresh one is started: the job is still
+    # 'running' in the DB (db.reap_dead_pid_jobs deliberately never fails
+    # extract jobs - see its docstring), with some stories already
+    # candidated from a prior process's work. A fresh scheduler (empty
+    # `states`) picking it back up must not redo those stories.
+    dbpath = tmp_path / "resume.sqlite"
+    conn = db.connect(dbpath)
+    for i in range(5):
+        db.upsert_story(conn, make_sig(f"s{i}"))
+    prompt_id = db.create_prompt(conn, "p1", "text1", _now())
+    job_id = db.create_job(conn, "extract", _now(), prompt_id=prompt_id, model="m", scope="all")
+    db.mark_job_running(conn, job_id, _now(), pid=999999)  # stale pid: old process
+    db.insert_candidates(conn, "s0", ["old"], "p1", "m", _now(), job_id=job_id)
+    db.insert_candidates(conn, "s1", ["old"], "p1", "m", _now(), job_id=job_id)
+    db.increment_job_progress(conn, job_id, done=2)
+    conn.commit()
+    conn.close()
+
+    _fast(monkeypatch)
+    processed = []
+    monkeypatch.setattr(
+        jobs_module, "extract_tags",
+        lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: (processed.append(sig.id), ["x"])[1],
+    )
+
+    scheduler.run_scheduler(dbpath)  # fresh process: empty `states`
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, job_id)
+    assert sorted(processed) == ["s2", "s3", "s4"]  # s0/s1 not redone
+    assert job["status"] == "done"
+    assert job["total"] == 5  # 2 already done + 3 newly processed
+    assert job["done"] == 5
+
+    s0_candidates = conn.execute(
+        "SELECT tag_text FROM tag_candidates WHERE story_id = 's0'"
+    ).fetchall()
+    assert [c[0] for c in s0_candidates] == ["old"]  # not duplicated
+    conn.close()
+
+
 def test_scheduler_runs_two_jobs_to_completion(tmp_path, make_sig, monkeypatch):
     dbpath = tmp_path / "s.sqlite"
     conn = db.connect(dbpath)

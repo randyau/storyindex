@@ -23,6 +23,40 @@ def _seed_stories(conn, make_sig, n=3):
     conn.commit()
 
 
+def test_scope_stories_all_excludes_stories_with_candidates_from_this_job(db_path, make_sig):
+    conn = db.connect(db_path)
+    _seed_stories(conn, make_sig, n=3)
+    job_id = db.create_job(conn, "extract", _now())
+    other_job_id = db.create_job(conn, "extract", _now())
+    db.insert_candidates(conn, "s0", ["x"], "p", "m", _now(), job_id=job_id)
+    db.insert_candidates(conn, "s1", ["x"], "p", "m", _now(), job_id=other_job_id)
+    conn.commit()
+
+    stories = jobs._scope_stories(conn, "all", exclude_job_id=job_id)
+
+    # s0 already has a candidate from job_id itself - excluded. s1's
+    # candidate belongs to a *different* job - not excluded (a different
+    # job's own scope isn't this job's business). s2 has none - included.
+    assert {s["id"] for s in stories} == {"s1", "s2"}
+    conn.close()
+
+
+def test_scope_stories_untagged_and_exclude_job_id_combine(db_path, make_sig):
+    conn = db.connect(db_path)
+    _seed_stories(conn, make_sig, n=3)
+    now = _now()
+    tag_id = db.get_or_create_tag(conn, "existing", now)
+    db.link_story_tag(conn, "s0", tag_id, source="human")  # s0: already has a real tag
+    job_id = db.create_job(conn, "extract", now)
+    db.insert_candidates(conn, "s1", ["x"], "p", "m", now, job_id=job_id)  # s1: candidate from this job
+    conn.commit()
+
+    stories = jobs._scope_stories(conn, "untagged", exclude_job_id=job_id)
+
+    assert {s["id"] for s in stories} == {"s2"}
+    conn.close()
+
+
 def test_extract_job_happy_path(db_path, make_sig, monkeypatch):
     conn = db.connect(db_path)
     _seed_stories(conn, make_sig, n=3)
@@ -46,6 +80,45 @@ def test_extract_job_happy_path(db_path, make_sig, monkeypatch):
     candidates = conn.execute("SELECT * FROM tag_candidates").fetchall()
     assert len(candidates) == 6  # 3 stories x 2 tags
     assert all(c["job_id"] == job_id for c in candidates)
+    conn.close()
+
+
+def test_extract_job_resume_skips_already_processed_stories(db_path, make_sig, monkeypatch):
+    # Simulates restarting a job that was left "running" partway through
+    # (e.g. the scheduler process was killed and picked back up) - it
+    # should pick up only the stories it hasn't already produced
+    # candidates for, not redo them, and total should account for the
+    # work already done plus what's left, not just what's left.
+    conn = db.connect(db_path)
+    _seed_stories(conn, make_sig, n=3)
+    prompt_id = db.create_prompt(conn, "default", "text", _now())
+    job_id = db.create_job(conn, "extract", _now(), prompt_id=prompt_id, model="m", scope="all")
+    db.mark_job_running(conn, job_id, _now(), pid=999999)
+    db.insert_candidates(conn, "s0", ["already-tagged"], "default", "m", _now(), job_id=job_id)
+    db.increment_job_progress(conn, job_id, done=1)
+    conn.commit()
+    conn.close()
+
+    processed = []
+
+    def fake_extract_tags(sig, model, prompt_text, host=None, max_ctx_tokens=None):
+        processed.append(sig.id)
+        return ["new-tag"]
+
+    monkeypatch.setattr(jobs, "extract_tags", fake_extract_tags)
+    jobs.run_extract_job(db_path, job_id)
+
+    conn = db.connect(db_path)
+    job = db.get_job(conn, job_id)
+    assert processed == ["s1", "s2"]  # s0 skipped - already had a candidate from this job
+    assert job["status"] == "done"
+    assert job["total"] == 3  # 1 already done + 2 newly processed
+    assert job["done"] == 3
+
+    s0_candidates = conn.execute(
+        "SELECT tag_text FROM tag_candidates WHERE story_id = 's0'"
+    ).fetchall()
+    assert [c[0] for c in s0_candidates] == ["already-tagged"]  # not duplicated
     conn.close()
 
 

@@ -742,11 +742,21 @@ def reap_dead_pid_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
     """Lighter-weight check for the case where the app itself is still up
     but a job's subprocess died without updating its own row (killed,
     crashed). Safe to call often (e.g. on every /jobs view) - only touches
-    jobs whose recorded pid is no longer alive."""
+    jobs whose recorded pid is no longer alive.
+
+    Excludes 'extract' jobs: unlike cluster/sync (each its own independent
+    _spawn_job subprocess, so a dead pid really does mean that job died),
+    every running extract job's `pid` column holds the *shared* scheduler
+    process's pid (see scheduler.py). If that process dies (crash, or an
+    intentional restart to pick up new code), every extract job sharing it
+    would otherwise get mass-failed on the very next page load - even
+    though app._ensure_scheduler_if_extract_jobs_pending already respawns
+    the scheduler for exactly this case, and the scheduler resumes a still-
+    'running' job cleanly (see jobs._scope_stories' exclude_job_id)."""
 
     with _row_mode(conn):
         running = conn.execute(
-            "SELECT id, pid FROM jobs WHERE status = 'running' AND pid IS NOT NULL"
+            "SELECT id, pid FROM jobs WHERE status = 'running' AND pid IS NOT NULL AND type != 'extract'"
         ).fetchall()
     reaped = []
     for row in running:

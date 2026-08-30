@@ -52,18 +52,27 @@ def row_to_sig(row: sqlite3.Row) -> StorySignature:
     )
 
 
-def _scope_stories(conn: sqlite3.Connection, scope: str | None) -> list[sqlite3.Row]:
+def _scope_stories(
+    conn: sqlite3.Connection, scope: str | None, exclude_job_id: int | None = None
+) -> list[sqlite3.Row]:
+    """Stories an extract job should (still) process. exclude_job_id makes
+    this resume-safe: it drops any story that already has a tag_candidates
+    row from *this specific job*, so restarting a long-running job (the
+    scheduler process got killed/crashed and picked back up, see
+    scheduler.run_scheduler and db.reap_dead_pid_jobs) continues from where
+    it left off instead of re-extracting - and writing duplicate
+    tag_candidates for - stories it already finished."""
     conn.row_factory = sqlite3.Row
+    where = ["s.status = 'active'"]
+    params: list = []
     if scope == "untagged":
-        rows = conn.execute(
-            """
-            SELECT * FROM stories s
-            WHERE s.status = 'active'
-              AND NOT EXISTS (SELECT 1 FROM story_tags st WHERE st.story_id = s.id)
-            """
-        ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM stories WHERE status = 'active'").fetchall()
+        where.append("NOT EXISTS (SELECT 1 FROM story_tags st WHERE st.story_id = s.id)")
+    if exclude_job_id is not None:
+        where.append(
+            "NOT EXISTS (SELECT 1 FROM tag_candidates tc WHERE tc.story_id = s.id AND tc.job_id = ?)"
+        )
+        params.append(exclude_job_id)
+    rows = conn.execute(f"SELECT * FROM stories s WHERE {' AND '.join(where)}", params).fetchall()
     conn.row_factory = None
     return rows
 
@@ -121,9 +130,14 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
             conn.commit()
             return
 
-        stories = _scope_stories(conn, job["scope"])
-        db.set_job_total(conn, job_id, len(stories))
-        db.mark_job_running(conn, job_id, _now(), os.getpid())
+        # exclude_job_id makes this resume-safe: done/failed are already
+        # cumulative from any prior run of this same job_id, so total is
+        # recomputed as done+failed+remaining rather than overwritten with
+        # just len(remaining) - see _scope_stories' docstring.
+        stories = _scope_stories(conn, job["scope"], exclude_job_id=job_id)
+        db.set_job_total(conn, job_id, job["done"] + job["failed"] + len(stories))
+        if job["status"] == "queued":
+            db.mark_job_running(conn, job_id, _now(), os.getpid())
         conn.commit()
 
         loaded_settings = settings.load()

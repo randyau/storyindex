@@ -1155,18 +1155,26 @@ def stories_by_author(
     conn: sqlite3.Connection, author: str, exclude_group_id: str, limit: int = 10
 ) -> list[sqlite3.Row]:
     """Other works by the same author, one row per story group (not per
-    chapter) - the "more like this" a reader most reliably wants."""
+    chapter) - the "more like this" a reader most reliably wants. Uses the
+    same reps-CTE "earliest active part" representative logic as
+    stories_for_author/stories_for_tag (rather than assuming part_index=0
+    is always the active one) so a story whose first chapter got individually
+    removed still surfaces here via its next active part, instead of
+    silently disappearing from this list while still being reachable from
+    browse/search/tag pages."""
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT id, group_id, title, author, part_index
-        FROM stories
-        WHERE author = ? AND group_id != ? AND part_index = 0 AND status = 'active'
-        ORDER BY title ASC
+    sql = f"""
+        WITH {_REPS_CTE}
+        SELECT s.id, s.group_id, s.part_index, {_TITLE_EXPR} AS title, s.author,
+               reps.part_count AS part_count
+        FROM reps
+        {_REPS_JOIN}
+        LEFT JOIN stories g ON g.group_id = s.group_id AND g.part_index = 0
+        WHERE s.author = ? AND s.group_id != ?
+        ORDER BY {_SORT_KEY_EXPR} ASC
         LIMIT ?
-        """,
-        (author, exclude_group_id, limit),
-    ).fetchall()
+    """
+    rows = conn.execute(sql, (author, exclude_group_id, limit)).fetchall()
     conn.row_factory = None
     return rows
 

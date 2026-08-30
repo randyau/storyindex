@@ -28,3 +28,22 @@ def test_stories_by_author_excludes_removed(conn, make_sig):
 
     results = db.stories_by_author(conn, "Jane", exclude_group_id="g1")
     assert results == []
+
+
+def test_stories_by_author_surfaces_group_when_first_part_removed(conn, make_sig):
+    # part_index 0 removed, part_index 1 still active - the group should
+    # still show up here via its next active part, same representative-row
+    # semantics as stories_for_author/stories_for_tag/search_stories use.
+    part0 = make_sig("s2p0", title="Second", author="Jane")
+    part0.group_id = "g2"
+    db.upsert_story(conn, part0)
+    part1 = make_sig("s2p1", title="Second", author="Jane")
+    part1.group_id = "g2"
+    part1.part_index = 1
+    db.upsert_story(conn, part1)
+    db.set_story_status(conn, "s2p0", "removed")
+    conn.commit()
+
+    results = db.stories_by_author(conn, "Jane", exclude_group_id="g1")
+    assert [r["id"] for r in results] == ["s2p1"]
+    assert results[0]["part_index"] == 1

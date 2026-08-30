@@ -1,3 +1,4 @@
+import pytest
 import requests
 
 from storyindex import ollama_client
@@ -42,11 +43,8 @@ def test_list_models_raises_ollama_error_on_failure(monkeypatch):
     def boom(url, timeout):
         raise requests.ConnectionError("refused")
     monkeypatch.setattr(requests, "get", boom)
-    try:
+    with pytest.raises(ollama_client.OllamaError):
         ollama_client.list_models()
-        assert False, "expected OllamaError"
-    except ollama_client.OllamaError:
-        pass
 
 
 def test_start_server_spawns_detached_process(monkeypatch):
@@ -71,11 +69,8 @@ def test_start_server_raises_ollama_error_when_cli_missing(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError("no such file: ollama")
     monkeypatch.setattr(subprocess, "Popen", boom)
-    try:
+    with pytest.raises(ollama_client.OllamaError, match="ollama"):
         ollama_client.start_server()
-        assert False, "expected OllamaError"
-    except ollama_client.OllamaError as exc:
-        assert "ollama" in str(exc)
 
 
 def test_recommended_models_includes_embedding_model():

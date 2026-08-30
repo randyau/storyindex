@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import html
 import re
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from .base import ExtractedFields, extract_block_text
@@ -101,7 +101,7 @@ class ExampleAdapter:
     def group_key(self, relpath: str) -> str:
         return self._story_dir(relpath) or relpath
 
-    @lru_cache(maxsize=None)
+    @cache  # noqa: B019 - adapter instances are short-lived (one parse run), not a leak risk
     def _chapter_order(self, story_dir: str) -> tuple[str, ...]:
         # Read the authoritative chapter order from the story's own index
         # page rather than guessing from filenames (e.g. don't assume

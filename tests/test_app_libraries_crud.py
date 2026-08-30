@@ -15,11 +15,13 @@ def test_switch_library_changes_active_db(tmp_path, make_sig):
 
     conn = db.connect(db_a)
     db.upsert_story(conn, make_sig("s1", title="Story In A"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     conn = db.connect(db_b)
     db.upsert_story(conn, make_sig("s2", title="Story In B"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     libraries.register("lib-a", str(db_a), libs_path)
     libraries.register("lib-b", str(db_b), libs_path)
@@ -41,7 +43,8 @@ def test_remove_and_restore_story(tmp_path, make_sig):
     libs_path = tmp_path / "libs.json"
     conn = db.connect(dbpath)
     db.upsert_story(conn, make_sig("s1", title="Removable"))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     client = _client(dbpath, libs_path)
     r = client.get("/")

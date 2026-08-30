@@ -11,7 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storyindex.ollama_client import CHARS_PER_TOKEN, DEFAULT_HOST, MAX_CTX_TOKENS, OllamaError, generate_json
+from storyindex.ollama_client import (
+    CHARS_PER_TOKEN,
+    DEFAULT_HOST,
+    MAX_CTX_TOKENS,
+    OllamaError,
+    generate_json,
+)
 from storyindex.signature import StorySignature
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"

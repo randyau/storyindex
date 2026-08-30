@@ -149,8 +149,8 @@ def test_cluster_job_folds_candidates_into_tags(db_path, make_sig, monkeypatch):
 
     links = conn.execute("SELECT * FROM story_tags").fetchall()
     assert len(links) == 2
-    assert all(l["job_id"] == job_id for l in links)
-    assert all(l["source"] == "model" for l in links)
+    assert all(link["job_id"] == job_id for link in links)
+    assert all(link["source"] == "model" for link in links)
 
     remaining = conn.execute(
         "SELECT COUNT(*) FROM tag_candidates WHERE status='candidate'"

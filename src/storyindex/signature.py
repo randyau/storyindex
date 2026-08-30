@@ -8,9 +8,9 @@ or the parser that produced them.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 REQUIRED_FIELDS = (
     "id",
@@ -42,7 +42,7 @@ class StorySignature:
     tags: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict) -> "StorySignature":
+    def from_dict(cls, data: dict) -> StorySignature:
         missing = [f for f in REQUIRED_FIELDS if f not in data]
         if missing:
             raise ValueError(f"signature missing required fields: {missing}")

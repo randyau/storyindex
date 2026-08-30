@@ -16,7 +16,8 @@ from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
 
-from storyindex import db, libraries, scheduler as scheduler_module, settings
+from storyindex import db, libraries, settings
+from storyindex import scheduler as scheduler_module
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
@@ -389,7 +390,7 @@ def new_story():
     import hashlib
     import uuid
 
-    story_id = hashlib.sha1(f"manual-{uuid.uuid4()}".encode("utf-8")).hexdigest()
+    story_id = hashlib.sha1(f"manual-{uuid.uuid4()}".encode()).hexdigest()
     db.create_manual_story(conn, story_id, title, author or "Unknown", body_text, _now())
     conn.commit()
     return redirect(url_for("story_detail", story_id=story_id))

@@ -1,7 +1,8 @@
 import datetime
 from itertools import groupby
 
-from storyindex import db, jobs as jobs_module, scheduler
+from storyindex import db, scheduler
+from storyindex import jobs as jobs_module
 
 
 def _now():

@@ -1,6 +1,6 @@
-import json
 
-from storyindex import db, jobs as jobs_module
+from storyindex import db
+from storyindex import jobs as jobs_module
 from storyindex.app import app
 
 

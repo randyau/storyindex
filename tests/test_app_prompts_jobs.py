@@ -1,5 +1,4 @@
 import os
-import time
 
 from storyindex import classify, db
 from storyindex.app import app
@@ -35,7 +34,8 @@ def test_prompts_list_filters_by_name(tmp_path):
     conn = db.connect(dbpath)
     db.create_prompt(conn, "pets tagger", "find pets", "2026-01-01T00:00:00Z")
     db.create_prompt(conn, "sci-fi tagger", "find sci-fi", "2026-01-01T00:00:00Z")
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     client = _client(dbpath)
     r = client.get("/prompts?q=pets")
@@ -52,7 +52,8 @@ def test_prompts_list_paginates(tmp_path, monkeypatch):
     conn = db.connect(dbpath)
     db.create_prompt(conn, "first", "text", "2026-01-01T00:00:00Z")
     db.create_prompt(conn, "second", "text", "2026-01-02T00:00:00Z")
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     client = _client(dbpath)
     r = client.get("/prompts")
@@ -120,7 +121,8 @@ def test_jobs_list_filters_by_status_and_type(tmp_path):
     j1 = db.create_job(conn, "sync", "2026-01-01T00:00:00Z")
     j2 = db.create_job(conn, "extract", "2026-01-01T00:00:00Z")
     db.mark_job_done(conn, j2, "2026-01-01T00:01:00Z")
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     client = _client(dbpath)
     r = client.get("/jobs?type=sync")

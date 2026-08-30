@@ -714,7 +714,6 @@ def reap_dead_pid_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
     but a job's subprocess died without updating its own row (killed,
     crashed). Safe to call often (e.g. on every /jobs view) - only touches
     jobs whose recorded pid is no longer alive."""
-    import os
 
     conn.row_factory = sqlite3.Row
     running = conn.execute(

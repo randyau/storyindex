@@ -1,3 +1,5 @@
+import pytest
+
 from storyindex import libraries
 
 
@@ -25,11 +27,8 @@ def test_set_active_requires_known_library(tmp_path):
     libraries.set_active("a", cfg)
     assert libraries.load(cfg)["active"] == "a"
 
-    try:
+    with pytest.raises(KeyError):
         libraries.set_active("missing", cfg)
-        assert False, "expected KeyError"
-    except KeyError:
-        pass
 
 
 def test_ensure_registered_and_active_first_run_activates(tmp_path):

@@ -32,7 +32,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from storyindex import db
-from storyindex.cluster import DEFAULT_EMBED_MODEL, DEFAULT_SIMILARITY_THRESHOLD, canonical_name, cluster_tag_texts
+from storyindex.cluster import (
+    DEFAULT_EMBED_MODEL,
+    DEFAULT_SIMILARITY_THRESHOLD,
+    canonical_name,
+    cluster_tag_texts,
+)
 
 
 def main() -> None:

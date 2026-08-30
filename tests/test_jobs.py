@@ -202,9 +202,11 @@ def test_cluster_job_folds_candidates_into_tags(db_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    def fake_cluster(texts, model, host=None):
+    def fake_cluster(texts, model, host=None, on_embedded=None):
         c = Cluster()
         for t in texts:
+            if on_embedded is not None:
+                on_embedded(t)
             c.add(t, [1.0])
         return [c]
 
@@ -229,6 +231,50 @@ def test_cluster_job_folds_candidates_into_tags(db_path, make_sig, monkeypatch):
         "SELECT COUNT(*) FROM tag_candidates WHERE status='candidate'"
     ).fetchone()[0]
     assert remaining == 0
+    conn.close()
+
+
+def test_cluster_job_reports_progress_during_embedding_not_just_at_the_end(db_path, make_sig, monkeypatch):
+    conn = db.connect(db_path)
+    _seed_stories(conn, make_sig, n=3)
+    now = _now()
+    db.insert_candidates(conn, "s0", ["alpha"], "p", "m", now)
+    db.insert_candidates(conn, "s1", ["beta"], "p", "m", now)
+    db.insert_candidates(conn, "s2", ["gamma"], "p", "m", now)
+    job_id = db.create_job(conn, "cluster", now, model="fake-embed", scope=None)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(jobs, "COMMIT_EVERY", 1)  # commit every increment so the check below can observe it
+    progress_during_embedding = []
+
+    def fake_cluster(texts, model, host=None, on_embedded=None):
+        clusters = []
+        for t in texts:
+            if on_embedded is not None:
+                on_embedded(t)
+                # Progress must already reflect this text by the time
+                # on_embedded returns, not just after cluster_tag_texts
+                # returns and the write-out loop starts.
+                check_conn = db.connect(db_path)
+                progress_during_embedding.append(db.get_job(check_conn, job_id)["done"])
+                check_conn.close()
+            c = Cluster()
+            c.add(t, [1.0])
+            clusters.append(c)
+        return clusters
+
+    monkeypatch.setattr(jobs, "cluster_tag_texts", fake_cluster)
+    jobs.run_cluster_job(db_path, job_id)
+
+    # done climbed 1, 2, 3 - during embedding, not after.
+    assert progress_during_embedding == [1, 2, 3]
+
+    conn = db.connect(db_path)
+    job = db.get_job(conn, job_id)
+    # Final done must still equal total, not double-counted by the
+    # write-out loop incrementing it again on top of the embedding phase.
+    assert job["done"] == job["total"] == 3
     conn.close()
 
 

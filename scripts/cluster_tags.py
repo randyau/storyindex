@@ -67,7 +67,16 @@ def main() -> None:
     distinct_texts = list(rows_by_text.keys())
     print(f"{len(rows)} pending candidates, {len(distinct_texts)} distinct tag strings")
 
-    clusters = cluster_tag_texts(distinct_texts, model=args.embed_model, threshold=args.threshold)
+    embedded = {"n": 0}
+
+    def _report(_text: str) -> None:
+        embedded["n"] += 1
+        if embedded["n"] % 200 == 0 or embedded["n"] == len(distinct_texts):
+            print(f"  embedded {embedded['n']}/{len(distinct_texts)}")
+
+    clusters = cluster_tag_texts(
+        distinct_texts, model=args.embed_model, threshold=args.threshold, on_embedded=_report
+    )
     print(f"formed {len(clusters)} clusters")
 
     now = datetime.datetime.utcnow().isoformat() + "Z"

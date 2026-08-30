@@ -10,6 +10,7 @@ a kept/renamed/merged canonical tag; nothing here is meant to be final.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from storyindex.ollama_client import DEFAULT_HOST, embed
@@ -50,14 +51,24 @@ def cluster_tag_texts(
     model: str = DEFAULT_EMBED_MODEL,
     threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
     host: str = DEFAULT_HOST,
+    on_embedded: Callable[[str], None] | None = None,
 ) -> list[Cluster]:
     """Greedy single-pass clustering: each text joins the most similar
     existing cluster if similarity exceeds threshold, else starts a new
     one. Order-dependent by design — good enough for a proposal pass that
-    a human reviews, not meant to be a stable/optimal partition."""
+    a human reviews, not meant to be a stable/optimal partition.
+
+    Embedding (one network round trip per distinct text) is the dominant
+    cost of this pass, not the clustering math itself - on_embedded, if
+    given, is called with each text right after its embedding completes,
+    so a caller can report progress incrementally through that phase
+    instead of only after every text has been embedded and this function
+    is ready to return a result."""
     clusters: list[Cluster] = []
     for text in texts:
         vec = embed(text, model=model, host=host)
+        if on_embedded is not None:
+            on_embedded(text)
         best_cluster = None
         best_sim = -1.0
         for c in clusters:

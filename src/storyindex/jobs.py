@@ -187,8 +187,31 @@ def run_cluster_job(db_path: Path, job_id: int) -> None:
         conn.commit()
 
         host = settings.load()["ollama_host"]
-        clusters = cluster_tag_texts(distinct_texts, model=embed_model, host=host)
 
+        # Embedding (one network round trip per distinct text) is the
+        # dominant cost of this pass for any real-sized backlog, so report
+        # progress as each one completes rather than leaving `done` at 0
+        # for however long that takes and only moving once clustering
+        # starts writing results out - a job_detail page watching a large
+        # cluster job would otherwise sit at a stuck-looking 0/N for most
+        # of its actual runtime.
+        embed_progress = {"since_commit": 0}
+
+        def _on_embedded(_text: str) -> None:
+            db.increment_job_progress(conn, job_id, done=1)
+            embed_progress["since_commit"] += 1
+            if embed_progress["since_commit"] >= COMMIT_EVERY:
+                conn.commit()
+                embed_progress["since_commit"] = 0
+
+        clusters = cluster_tag_texts(
+            distinct_texts, model=embed_model, host=host, on_embedded=_on_embedded
+        )
+        conn.commit()
+
+        # `done` already reached len(distinct_texts) during embedding above
+        # - this pass only writes clustering's results out, so it doesn't
+        # increment progress again (that would double-count past 100%).
         since_commit = 0
         for cluster in clusters:
             name = canonical_name(cluster.members, counts)
@@ -198,7 +221,6 @@ def run_cluster_job(db_path: Path, job_id: int) -> None:
                     db.link_story_tag(conn, row["story_id"], tag_id, source="model", job_id=job_id)
                     db.mark_candidate_clustered(conn, row["id"])
                 since_commit += 1
-                db.increment_job_progress(conn, job_id, done=1)
                 if since_commit >= COMMIT_EVERY:
                     conn.commit()
                     since_commit = 0

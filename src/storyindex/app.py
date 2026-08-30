@@ -607,12 +607,16 @@ def _run_prompt_preview(prompt: sqlite3.Row, model: str, stories: list[sqlite3.R
     from storyindex.classify import ExtractionError, extract_tags
     from storyindex.jobs import row_to_sig
 
-    host = settings.load(_settings_path())["ollama_host"]
+    loaded_settings = settings.load(_settings_path())
+    host = loaded_settings["ollama_host"]
+    max_ctx_tokens = loaded_settings["max_ctx_tokens"]
     results = []
     for row in stories:
         sig = row_to_sig(row)
         try:
-            tags = extract_tags(sig, model=model, prompt_text=prompt["text"], host=host)
+            tags = extract_tags(
+                sig, model=model, prompt_text=prompt["text"], host=host, max_ctx_tokens=max_ctx_tokens
+            )
         except ExtractionError as exc:
             results.append({"story": row, "tags": None, "error": str(exc)})
         else:
@@ -687,6 +691,8 @@ def settings_page():
                 or settings.DEFAULTS["default_extract_model"],
                 "default_embed_model": request.form.get("default_embed_model", "").strip()
                 or settings.DEFAULTS["default_embed_model"],
+                "max_ctx_tokens": request.form.get("max_ctx_tokens", type=int)
+                or settings.DEFAULTS["max_ctx_tokens"],
             },
             _settings_path(),
         )

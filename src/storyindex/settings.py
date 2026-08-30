@@ -19,6 +19,14 @@ DEFAULTS = {
     "ollama_host": DEFAULT_HOST,
     "default_extract_model": "qwen2.5:7b-instruct",
     "default_embed_model": "nomic-embed-text",
+    # Hardware ceiling for the extraction pass's context window: how much
+    # of a long story classify.extract_tags can ask a model to read in one
+    # call before it falls back to chunking. Actual GPU memory isn't
+    # something this process can reliably auto-detect, so this is the
+    # user's own stated budget - the shipped default fits comfortably on a
+    # modest (~8GB) card; raise it here if your hardware can take more, so
+    # a long story needs fewer chunks.
+    "max_ctx_tokens": 32768,
 }
 
 VALID_THEMES = ("dark", "light")

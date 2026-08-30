@@ -29,7 +29,7 @@ def test_scheduler_runs_two_jobs_to_completion(tmp_path, make_sig, monkeypatch):
     conn.close()
 
     _fast(monkeypatch)
-    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["x"])
 
     scheduler.run_scheduler(dbpath)
 
@@ -57,7 +57,7 @@ def test_scheduler_batches_calls_by_job_instead_of_strict_interleave(tmp_path, m
     calls = []
     monkeypatch.setattr(
         jobs_module, "extract_tags",
-        lambda sig, model, prompt_text, host=None: (calls.append(prompt_text), ["x"])[1],
+        lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: (calls.append(prompt_text), ["x"])[1],
     )
 
     scheduler.run_scheduler(dbpath)
@@ -85,7 +85,7 @@ def test_scheduler_handles_mixed_scope_sizes(tmp_path, make_sig, monkeypatch):
     conn.close()
 
     _fast(monkeypatch, block_size=1)
-    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["x"])
 
     scheduler.run_scheduler(dbpath)
 
@@ -110,7 +110,7 @@ def test_scheduler_stops_processing_a_cancelled_job(tmp_path, make_sig, monkeypa
     _fast(monkeypatch, block_size=1)
     calls = {"n": 0}
 
-    def fake_extract(sig, model, prompt_text, host=None):
+    def fake_extract(sig, model, prompt_text, host=None, max_ctx_tokens=None):
         calls["n"] += 1
         if calls["n"] == 2:
             conn2 = db.connect(dbpath)
@@ -152,7 +152,7 @@ def test_scheduler_groups_jobs_by_model_to_avoid_model_swaps(tmp_path, make_sig,
     models_used = []
     monkeypatch.setattr(
         jobs_module, "extract_tags",
-        lambda sig, model, prompt_text, host=None: (models_used.append(model), ["x"])[1],
+        lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: (models_used.append(model), ["x"])[1],
     )
 
     scheduler.run_scheduler(dbpath)
@@ -177,7 +177,7 @@ def test_scheduler_cancel_stops_within_one_call_mid_block(tmp_path, make_sig, mo
     _fast(monkeypatch)  # BLOCK_SIZE untouched (10), well above the 8 stories here
     calls = {"n": 0}
 
-    def fake_extract(sig, model, prompt_text, host=None):
+    def fake_extract(sig, model, prompt_text, host=None, max_ctx_tokens=None):
         calls["n"] += 1
         if calls["n"] == 1:
             conn2 = db.connect(dbpath)
@@ -214,7 +214,7 @@ def test_scheduler_survives_one_jobs_unexpected_error(tmp_path, make_sig, monkey
 
     _fast(monkeypatch, block_size=1)
 
-    def flaky_extract(sig, model, prompt_text, host=None):
+    def flaky_extract(sig, model, prompt_text, host=None, max_ctx_tokens=None):
         if prompt_text == "text1":
             raise RuntimeError("boom - not an ExtractionError")
         return ["x"]
@@ -242,7 +242,7 @@ def test_scheduler_records_block_timing_for_eta_estimation(tmp_path, make_sig, m
     conn.close()
 
     _fast(monkeypatch, block_size=2)
-    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["x"])
 
     scheduler.run_scheduler(dbpath)
 

@@ -105,7 +105,9 @@ def run_scheduler(db_path: Path) -> None:
                 continue
             idle_since = None
 
-            host = settings.load()["ollama_host"]
+            loaded_settings = settings.load()
+            host = loaded_settings["ollama_host"]
+            max_ctx_tokens = loaded_settings["max_ctx_tokens"]
             # Group by model, not just creation order: alternating models
             # forces a full VRAM swap in Ollama every switch, far more
             # expensive than the prefix-cache miss from alternating prompts
@@ -140,6 +142,7 @@ def run_scheduler(db_path: Path) -> None:
                     for row in block:
                         process_extract_item(
                             conn, jid, job["model"], state["prompt"]["text"], state["prompt"]["name"], row, host,
+                            max_ctx_tokens=max_ctx_tokens,
                         )
                         conn.commit()
                         processed += 1

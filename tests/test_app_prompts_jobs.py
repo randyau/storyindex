@@ -76,7 +76,7 @@ def test_preview_prompt_random_sample(tmp_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None: ["mystery"])
+    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["mystery"])
     client = _client(dbpath)
     r = client.post(f"/prompts/{prompt_id}/preview", data={"model": "m", "sample_size": "5"})
     assert r.status_code == 200
@@ -94,7 +94,7 @@ def test_preview_prompt_on_specific_story(tmp_path, make_sig, monkeypatch):
     conn.commit()
     conn.close()
 
-    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None: ["theme-x"])
+    monkeypatch.setattr(classify, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["theme-x"])
     client = _client(dbpath)
     r = client.post(
         "/story/s1/prompts/preview",
@@ -161,7 +161,7 @@ def test_create_extract_job_runs_to_completion(tmp_path, make_sig, monkeypatch):
         if row:
             jobs_module.run_extract_job(dbpath, row[0])
 
-    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None: ["x"])
+    monkeypatch.setattr(jobs_module, "extract_tags", lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: ["x"])
     monkeypatch.setattr("storyindex.app._ensure_scheduler_running", fake_ensure_scheduler_running)
 
     client = _client(dbpath)

@@ -23,7 +23,7 @@ import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from storyindex import db, settings
+from storyindex import db, ollama_client, settings
 from storyindex.classify import ExtractionError, extract_tags
 from storyindex.cluster import DEFAULT_EMBED_MODEL, canonical_name, cluster_tag_texts
 from storyindex.signature import StorySignature
@@ -76,6 +76,7 @@ def process_extract_item(
     prompt_name: str,
     row: sqlite3.Row,
     host: str,
+    max_ctx_tokens: int = ollama_client.MAX_CTX_TOKENS,
 ) -> None:
     """Run extraction for one story and record the outcome (candidates or
     a job_error) against job_id. Shared by run_extract_job's own single-job
@@ -83,7 +84,9 @@ def process_extract_item(
     identically on a per-story basis."""
     sig = row_to_sig(row)
     try:
-        tags = extract_tags(sig, model=model, prompt_text=prompt_text, host=host)
+        tags = extract_tags(
+            sig, model=model, prompt_text=prompt_text, host=host, max_ctx_tokens=max_ctx_tokens
+        )
     except ExtractionError as exc:
         db.increment_job_progress(conn, job_id, failed=1)
         db.record_job_error(conn, job_id, f"{row['title']} ({row['id']})", str(exc), _now())
@@ -123,10 +126,15 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
         db.mark_job_running(conn, job_id, _now(), os.getpid())
         conn.commit()
 
-        host = settings.load()["ollama_host"]
+        loaded_settings = settings.load()
+        host = loaded_settings["ollama_host"]
+        max_ctx_tokens = loaded_settings["max_ctx_tokens"]
         since_commit = 0
         for row in stories:
-            process_extract_item(conn, job_id, job["model"], prompt["text"], prompt["name"], row, host)
+            process_extract_item(
+                conn, job_id, job["model"], prompt["text"], prompt["name"], row, host,
+                max_ctx_tokens=max_ctx_tokens,
+            )
             since_commit += 1
             if since_commit >= EXTRACT_COMMIT_EVERY:
                 conn.commit()

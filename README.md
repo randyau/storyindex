@@ -104,7 +104,9 @@ this for LAN access, or contributing to the code itself.
 - **Tag** stories two ways: by hand, or via a two-pass local-model
   pipeline (free-form extraction → embedding-based clustering into a
   canonical vocabulary), with a review queue for approving/rejecting
-  model proposals.
+  model proposals. A story too long for one model call gets split into as
+  few chunks as your hardware and the model's own context window allow
+  (set the ceiling under **/settings → hardware**) rather than truncated.
 - **Schedule** extraction jobs through one persistent background process
   that round-robins across whatever's queued, batched to keep the local
   model's cache warm rather than thrashing between jobs on every call —

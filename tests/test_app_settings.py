@@ -45,3 +45,30 @@ def test_settings_post_persists_to_disk(tmp_path):
     data = settings.load(tmp_path / "settings.json")
     assert data["theme"] == "light"
     assert data["ollama_host"] == "http://box:9999"
+
+
+def test_settings_post_persists_max_ctx_tokens(tmp_path):
+    client = _client(tmp_path)
+    client.post("/settings", data={
+        "theme": "dark",
+        "ollama_host": "http://localhost:11434",
+        "default_extract_model": "m1",
+        "default_embed_model": "m2",
+        "max_ctx_tokens": "65536",
+    })
+    from storyindex import settings
+
+    assert settings.load(tmp_path / "settings.json")["max_ctx_tokens"] == 65536
+
+
+def test_settings_post_missing_max_ctx_tokens_falls_back_to_default(tmp_path):
+    client = _client(tmp_path)
+    client.post("/settings", data={
+        "theme": "dark",
+        "ollama_host": "http://localhost:11434",
+        "default_extract_model": "m1",
+        "default_embed_model": "m2",
+    })
+    from storyindex import settings
+
+    assert settings.load(tmp_path / "settings.json")["max_ctx_tokens"] == settings.DEFAULTS["max_ctx_tokens"]

@@ -15,6 +15,13 @@
   <p class="muted">where extraction/embedding jobs and the <a href="{{ url_for('ollama_status') }}">ollama status page</a> look for a local model server.</p>
   <p><label>host: <input type="text" name="ollama_host" value="{{ current.ollama_host }}" style="width:20rem"></label></p>
 
+  <h3>hardware</h3>
+  <p class="muted">largest context window (in tokens) your GPU can handle for the extraction
+  pass. A story too long to fit gets split into as few chunks as this allows rather than
+  truncated — raise this if your card has the VRAM to spare, so long stories need fewer
+  chunks. We can't detect this automatically, so it's a one-time guess you set here.</p>
+  <p><label>max context tokens: <input type="number" name="max_ctx_tokens" value="{{ current.max_ctx_tokens }}" min="4096" step="4096" style="width:10rem"></label></p>
+
   <h3>default models</h3>
   <p class="muted">pre-fills the model field on job/prompt-preview forms — just a starting point, editable per run.</p>
   <p><label>extraction model: <input type="text" name="default_extract_model" value="{{ current.default_extract_model }}" style="width:20rem"></label></p>

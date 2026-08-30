@@ -5,6 +5,7 @@ happen and it only ever talks to localhost."""
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 
 import requests
 
@@ -17,31 +18,37 @@ DEFAULT_HOST = "http://localhost:11434"
 # of a story it's supposed to tag in full. We size it per-request from the
 # actual prompt length instead, rounded up to the next power-of-two-ish
 # bucket so KV-cache allocation stays predictable rather than a fresh size
-# every call. Capped at 32768: bigger buckets exist for the handful of
-# very long stories, but past this point VRAM on modest cards runs out
-# before context does, and a story that long was going to lose fidelity to
-# an LLM's attention anyway.
-_CTX_BUCKETS = [4096, 8192, 16384, 32768]
+# every call. Buckets go up to 131072 for hardware/models that can actually
+# use that much; MAX_CTX_TOKENS below is just the *default* ceiling
+# (see classify._effective_max_ctx_tokens for where a bigger bucket
+# actually gets requested, driven by settings.max_ctx_tokens).
+_CTX_BUCKETS = [4096, 8192, 16384, 32768, 65536, 131072]
+# The largest bucket this client will ever request, regardless of what a
+# caller's own (settings-derived) ceiling asks for - a hard backstop, not
+# a recommendation. See MAX_CTX_TOKENS below for the actual default.
+ABSOLUTE_MAX_CTX_TOKENS = _CTX_BUCKETS[-1]
 CHARS_PER_TOKEN = 4  # rough estimator; erring high costs a bit of unused KV-cache, erring low truncates input
-# Public so callers building a prompt (classify.build_prompt) can pre-
-# truncate oversized input to fit, rather than silently exceeding this and
-# letting Ollama truncate the raw token stream instead - which cuts from
-# whichever end produces the newest tokens, and for a prompt that's
-# instructions-then-content, that's the content's tail, not a clean
-# no-op. For a prompt that's content-then-instructions, or where the
-# content is what's oversized, the caller needs this number to truncate
-# in a way that keeps the instructions intact.
-MAX_CTX_TOKENS = _CTX_BUCKETS[-1]
+# Default/safe ceiling if the user hasn't told /settings about bigger
+# hardware: fits comfortably on a modest (~8GB) card, and a story that
+# long was going to lose fidelity to an LLM's attention anyway. Public so
+# callers building a prompt (classify.build_prompt) can pre-truncate
+# oversized input to fit, rather than silently exceeding this and letting
+# Ollama truncate the raw token stream instead - which cuts from whichever
+# end produces the newest tokens, and for a prompt that's
+# instructions-then-content, that's the content's tail, not a clean no-op.
+MAX_CTX_TOKENS = 32768
+MIN_CTX_TOKENS = _CTX_BUCKETS[0]  # sane floor - never worth requesting less
 
 
-def _estimate_num_ctx(prompt: str) -> int:
+def _estimate_num_ctx(prompt: str, max_ctx: int = MAX_CTX_TOKENS) -> int:
     est_tokens = len(prompt) // CHARS_PER_TOKEN
     # Leave headroom for the model's own output tokens on top of the prompt.
     needed = est_tokens + 512
-    for bucket in _CTX_BUCKETS:
+    usable = [b for b in _CTX_BUCKETS if b <= max_ctx] or [max_ctx]
+    for bucket in usable:
         if needed <= bucket:
             return bucket
-    return _CTX_BUCKETS[-1]
+    return usable[-1]
 
 
 class OllamaError(RuntimeError):
@@ -54,12 +61,15 @@ def generate_json(
     host: str = DEFAULT_HOST,
     temperature: float = 0.2,
     timeout: int = 300,
+    max_ctx: int = MAX_CTX_TOKENS,
 ) -> dict:
     """Send prompt to the local model, requesting strict JSON output.
     Raises OllamaError on transport failure or unparsable output. Default
     timeout is generous because num_ctx now scales with prompt length (see
     _estimate_num_ctx) — a long story means a long prefill, not just a
-    long generation."""
+    long generation. max_ctx caps which bucket _estimate_num_ctx can pick -
+    callers with more headroom (see model_max_context / settings) can raise
+    it to fit more of a long story in one call."""
     try:
         resp = requests.post(
             f"{host}/api/generate",
@@ -68,7 +78,7 @@ def generate_json(
                 "prompt": prompt,
                 "format": "json",
                 "stream": False,
-                "options": {"temperature": temperature, "num_ctx": _estimate_num_ctx(prompt)},
+                "options": {"temperature": temperature, "num_ctx": _estimate_num_ctx(prompt, max_ctx)},
             },
             timeout=timeout,
         )
@@ -81,6 +91,30 @@ def generate_json(
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise OllamaError(f"model did not return valid JSON: {raw!r}") from exc
+
+
+@lru_cache(maxsize=32)
+def model_max_context(model: str, host: str = DEFAULT_HOST, timeout: float = 10.0) -> int | None:
+    """The context length this specific model was actually built/quantized
+    for, straight from Ollama's own model metadata (`/api/show`) - so a
+    long story's chunk budget (see classify._effective_max_ctx_tokens)
+    isn't capped by our own bucket ceiling alone when the model itself
+    supports less. Best-effort: returns None on any failure (server
+    unreachable, unexpected response shape) rather than raising, since a
+    missing value just means the caller falls back to its hardware-only
+    ceiling. Cached per (model, host) for the life of the process - the
+    same installed model's context length doesn't change mid-run, and this
+    can get called once per story in a large extraction batch."""
+    try:
+        resp = requests.post(f"{host}/api/show", json={"model": model}, timeout=timeout)
+        resp.raise_for_status()
+        info = resp.json().get("model_info") or {}
+    except (requests.RequestException, ValueError):
+        return None
+    for key, value in info.items():
+        if key.endswith(".context_length") and isinstance(value, int) and value > 0:
+            return value
+    return None
 
 
 def embed(

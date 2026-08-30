@@ -292,6 +292,56 @@ def test_job_status_json_does_not_spawn_scheduler_when_nothing_pending(tmp_path,
     assert calls == []
 
 
+def test_scheduler_page_shows_idle_when_nothing_queued(tmp_path):
+    dbpath = tmp_path / "t.sqlite"
+    client = _client(dbpath)
+    r = client.get("/scheduler")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "idle" in body
+    assert "nothing queued" in body
+
+
+def test_scheduler_page_lists_active_jobs_grouped_by_model(tmp_path, monkeypatch):
+    # Mirrors scheduler.run_scheduler's own visiting order: grouped by
+    # model first, creation order within a model - jobs created in an
+    # order that would interleave models (X, Y, X) should still list both
+    # model-X jobs before the model-Y one.
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    p1 = db.create_prompt(conn, "p1", "text1", "2026-01-01T00:00:00Z")
+    p2 = db.create_prompt(conn, "p2", "text2", "2026-01-01T00:00:01Z")
+    p3 = db.create_prompt(conn, "p3", "text3", "2026-01-01T00:00:02Z")
+    j_x1 = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", prompt_id=p1, model="modelX", scope="all")
+    db.create_job(conn, "extract", "2026-01-01T00:00:01Z", prompt_id=p2, model="modelY", scope="all")
+    j_x2 = db.create_job(conn, "extract", "2026-01-01T00:00:02Z", prompt_id=p3, model="modelX", scope="all")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr("storyindex.app._ensure_scheduler_running", lambda: None)
+    client = _client(dbpath)
+    r = client.get("/scheduler")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert body.index(f">#{j_x1}<") < body.index(f">#{j_x2}<") < body.index("modelY")
+
+
+def test_scheduler_status_json_endpoint(tmp_path, monkeypatch):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", model="m", scope="all")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr("storyindex.app._ensure_scheduler_running", lambda: None)
+    client = _client(dbpath)
+    r = client.get("/scheduler/status.json")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["alive"] is False
+    assert [j["id"] for j in data["jobs"]] == [job_id]
+
+
 def test_finished_extract_job_points_to_clustering_not_review(tmp_path):
     # story_tags.job_id is set by whichever cluster job links a tag, never
     # by the extract job that only wrote tag_candidates - a "review the

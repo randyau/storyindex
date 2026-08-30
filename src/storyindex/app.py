@@ -16,7 +16,7 @@ from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
 
-from storyindex import db, libraries, settings
+from storyindex import db, libraries, scheduler as scheduler_module, settings
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
@@ -668,6 +668,55 @@ def job_status_json(job_id: int):
     return {
         "status": job["status"], "total": job["total"], "done": job["done"],
         "failed": job["failed"], "error": job["error"],
+    }
+
+
+def _scheduler_status() -> dict:
+    """Shared by /scheduler and /scheduler/status.json - pid liveness plus
+    the active extract jobs in the same model-grouped order scheduler.py
+    itself visits them in, so the view reflects the real rotation rather
+    than just job-creation order."""
+    pidfile = _scheduler_pidfile()
+    pid = None
+    if pidfile.exists():
+        try:
+            pid = int(pidfile.read_text().strip())
+        except ValueError:
+            pid = None
+    alive = pid is not None and db._pid_alive(pid)
+    conn = get_db()
+    active_jobs = db.list_active_extract_jobs(conn)
+    return {"alive": alive, "pid": pid, "active_jobs": active_jobs}
+
+
+@app.route("/scheduler")
+def scheduler_status():
+    conn = get_db()
+    if db.reap_dead_pid_jobs(conn, _now()):
+        conn.commit()
+    _ensure_scheduler_if_extract_jobs_pending(conn)
+    status = _scheduler_status()
+    return render_template("scheduler.html", block_size=scheduler_module.BLOCK_SIZE, **status)
+
+
+@app.route("/scheduler/status.json")
+def scheduler_status_json():
+    conn = get_db()
+    if db.reap_dead_pid_jobs(conn, _now()):
+        conn.commit()
+    _ensure_scheduler_if_extract_jobs_pending(conn)
+    status = _scheduler_status()
+    return {
+        "alive": status["alive"],
+        "pid": status["pid"],
+        "jobs": [
+            {
+                "id": j["id"], "status": j["status"], "model": j["model"],
+                "prompt_name": j["prompt_name"], "done": j["done"],
+                "total": j["total"], "failed": j["failed"],
+            }
+            for j in status["active_jobs"]
+        ],
     }
 
 

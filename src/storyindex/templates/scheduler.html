@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}scheduler — storyindex{% endblock %}
+{% block content %}
+<h2>extraction scheduler</h2>
+<p class="muted">one background process round-robins every queued/running extraction job in blocks of
+{{ block_size }} stories at a time, grouped by model, so each job's fixed instruction prefix stays warm
+in the local model's cache instead of losing it on every call. It exits on its own once nothing is
+queued, and respawns automatically the next time an extraction job is created or this page (or a job's
+status) is checked.</p>
+
+<p id="scheduler-state">
+  {% if alive %}
+  <span style="color:var(--accent)">● running</span> <span class="muted">(pid {{ pid }})</span>
+  {% else %}
+  <span class="muted">● idle — nothing queued</span>
+  {% endif %}
+</p>
+
+<h3>rotation <span class="muted">(<span id="rotation-count">{{ active_jobs|length }}</span>)</span></h3>
+<p class="muted">visited in this order each round — jobs sharing a model run back to back before the
+scheduler moves to the next model, since switching models means a full reload rather than just a
+prefix-cache miss.</p>
+<table id="rotation-table">
+<tr><th>#</th><th>job</th><th>status</th><th>model</th><th>prompt</th><th>progress</th></tr>
+{% for j in active_jobs %}
+<tr>
+  <td class="muted">{{ loop.index }}</td>
+  <td><a href="{{ url_for('job_detail', job_id=j['id']) }}">#{{ j['id'] }}</a></td>
+  <td>{{ j['status'] }}</td>
+  <td>{{ j['model'] }}</td>
+  <td>{{ j['prompt_name'] or '' }}</td>
+  <td>{{ j['done'] }}/{{ j['total'] }}{% if j['failed'] %} ({{ j['failed'] }} failed){% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="muted">nothing queued right now.</td></tr>
+{% endfor %}
+</table>
+
+<p><a href="{{ url_for('jobs_list') }}">← full job history</a></p>
+
+{% if active_jobs %}
+<script>
+setTimeout(function () { location.reload(); }, 4000);
+</script>
+{% endif %}
+{% endblock %}

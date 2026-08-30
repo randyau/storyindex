@@ -630,6 +630,26 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
     return row
 
 
+def list_active_extract_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Extract jobs the scheduler is currently rotating through (queued or
+    running), ordered the same way scheduler.py visits them each round -
+    grouped by model, then creation order within a model (see
+    scheduler.run_scheduler's `sorted(..., key=...)`). Used by the
+    /scheduler status view; the scheduler itself keeps its own separate
+    per-round query rather than depending on this."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT j.*, p.name AS prompt_name FROM jobs j
+        LEFT JOIN prompts p ON p.id = j.prompt_id
+        WHERE j.type = 'extract' AND j.status IN ('queued', 'running')
+        ORDER BY j.model, j.created_at
+        """
+    ).fetchall()
+    conn.row_factory = None
+    return rows
+
+
 def revert_job(conn: sqlite3.Connection, job_id: int, reverted_at: str) -> None:
     """Undo everything a job produced: its story_tags links and
     tag_candidates rows, then any tag left with zero remaining links

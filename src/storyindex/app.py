@@ -113,6 +113,8 @@ def _now() -> str:
     return datetime.datetime.utcnow().isoformat() + "Z"
 
 
+# --- shared helpers (formatting, ETA math, tag cloud, pagination) ----------
+
 def _format_duration(seconds: float) -> str:
     seconds = max(0, int(seconds))
     days, rem = divmod(seconds, 86400)
@@ -232,6 +234,8 @@ def _filter_url(q: str, include_ids: list[int], exclude_ids: list[int]) -> str:
         exclude_tags=",".join(str(i) for i in exclude_ids) or None,
     )
 
+
+# --- browse / search / story pages ------------------------------------
 
 @app.route("/")
 def index():
@@ -425,6 +429,8 @@ def restore_story(story_id: str):
     return redirect(url_for("story_detail", story_id=story_id))
 
 
+# --- per-story tag actions ----------------------------------------------
+
 @app.route("/tags/autocomplete.json")
 def tags_autocomplete():
     conn = get_db()
@@ -476,6 +482,8 @@ def reject_all_tags(story_id: str):
     conn.commit()
     return redirect(request.form.get("next") or url_for("story_detail", story_id=story_id))
 
+
+# --- review queue -------------------------------------------------------
 
 @app.route("/review")
 def review_queue():
@@ -536,6 +544,8 @@ def review_stories_queue():
     )
 
 
+# --- job control ---------------------------------------------------------
+
 @app.route("/jobs/<int:job_id>/revert", methods=["POST"])
 def revert_job(job_id: int):
     conn = get_db()
@@ -562,6 +572,8 @@ def cancel_job(job_id: int):
             pass
     return redirect(url_for("job_detail", job_id=job_id))
 
+
+# --- prompt library -------------------------------------------------------
 
 @app.route("/prompts")
 def prompts_list():
@@ -634,6 +646,8 @@ def preview_prompt_on_story(story_id: str):
     return render_template("prompt_preview.html", prompt=prompt, results=results, model=model, target_story=story)
 
 
+# --- ollama status/control -------------------------------------------------
+
 @app.route("/ollama")
 def ollama_status():
     from storyindex import ollama_client
@@ -660,6 +674,8 @@ def ollama_start():
     return redirect(url_for("ollama_status"))
 
 
+# --- settings ---------------------------------------------------------
+
 @app.route("/settings", methods=["GET", "POST"])
 def settings_page():
     if request.method == "POST":
@@ -677,6 +693,8 @@ def settings_page():
         return redirect(url_for("settings_page"))
     return render_template("settings.html", current=settings.load(_settings_path()))
 
+
+# --- job control (cont.) ---------------------------------------------------
 
 @app.route("/jobs")
 def jobs_list():
@@ -744,6 +762,8 @@ def job_status_json(job_id: int):
     }
 
 
+# --- scheduler status -----------------------------------------------------
+
 def _scheduler_status() -> dict:
     """Shared by /scheduler and /scheduler/status.json - pid liveness plus
     the active extract jobs in the same model-grouped order scheduler.py
@@ -796,6 +816,8 @@ def scheduler_status_json():
         ],
     }
 
+
+# --- job creation -----------------------------------------------------
 
 @app.route("/jobs/extract", methods=["POST"])
 def create_extract_job():
@@ -864,6 +886,8 @@ def create_sync_job():
     return redirect(url_for("job_detail", job_id=job_id))
 
 
+# --- libraries -------------------------------------------------------
+
 @app.context_processor
 def _inject_library_name():
     data = libraries.load(_libraries_path())
@@ -918,6 +942,8 @@ def rename_library_route():
             pass
     return redirect(url_for("libraries_list"))
 
+
+# --- tag CRUD (admin) -------------------------------------------------
 
 @app.route("/tags")
 def tags_admin():

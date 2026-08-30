@@ -173,6 +173,8 @@ _ADDITIVE_COLUMNS = [
 ]
 
 
+# --- schema / connection setup --------------------------------------------
+
 def _migrate(conn: sqlite3.Connection) -> None:
     for table, col, coldef in _ADDITIVE_COLUMNS:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -273,6 +275,8 @@ def _row_mode(conn: sqlite3.Connection):
     finally:
         conn.row_factory = None
 
+
+# --- story ingest (from a StorySignature) -----------------------------
 
 def upsert_story(conn: sqlite3.Connection, sig) -> None:
     conn.execute(
@@ -822,7 +826,8 @@ def count_jobs(conn: sqlite3.Connection, status: str | None = None, type: str | 
     return conn.execute(f"SELECT COUNT(*) FROM jobs {where_sql}", params).fetchone()[0]
 
 
-# --- browse / review app --------------------------------------------------
+# --- story & tag browse/listing (the read-heavy paths behind the web UI's
+# browse/tag/author pages) --------------------------------------------------
 
 def list_tags_with_counts(
     conn: sqlite3.Connection, q: str | None = None, limit: int | None = None, offset: int = 0
@@ -1247,6 +1252,8 @@ def count_stories_for_author(conn: sqlite3.Connection, author: str) -> int:
     ).fetchone()[0]
 
 
+# --- tag CRUD (curated vocabulary: rename/merge/delete) --------------------
+
 def delete_tag(conn: sqlite3.Connection, tag_id: int) -> None:
     """Removes the tag and every story's link to it. Leaves tag_candidates
     (pre-clustering raw text, a separate pipeline stage) untouched, so a
@@ -1312,6 +1319,8 @@ def get_tag_by_name(conn: sqlite3.Connection, name: str) -> sqlite3.Row | None:
         row = conn.execute("SELECT id, name FROM tags WHERE name = ?", (name,)).fetchone()
     return row
 
+
+# --- review queue (model-proposed tags awaiting human approval) ------------
 
 def count_pending_review(conn: sqlite3.Connection, job_id: int | None = None) -> int:
     if job_id is not None:

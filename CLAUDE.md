@@ -28,6 +28,10 @@ what the project does and how to run it.
   each behavior change, run `uv run pytest tests/ -q` before committing,
   and keep the suite green at every commit — don't batch a large amount of
   unverified work into one commit.
+- **Lint clean at every commit.** Run `uv run ruff check .` alongside the
+  test suite before committing; fix what it flags rather than adding
+  broad ignores. Per-file ignores exist only for genuinely intentional
+  patterns (see `[tool.ruff.lint.per-file-ignores]` in `pyproject.toml`).
 - **Be token-efficient during a work chunk.** Don't narrate step-by-step
   while working; give a summary at the end of a chunk or when you need
   feedback/clarification, not continuously.
@@ -86,9 +90,11 @@ what the project does and how to run it.
   virtualenv or lockfile workflow beyond what `uv` manages, so drive
   everything through it rather than a manually-activated venv:
   - `uv sync --extra dev` — create/update `.venv` from `pyproject.toml`
-    (installs `pytest` too via the `dev` extra).
+    (installs `pytest` and `ruff` via the `dev` extra).
   - `uv run pytest tests/ -q` — run the suite (equivalent to the
     `python -m pytest tests/ -q` used elsewhere in this doc/README).
+  - `uv run ruff check .` — lint; see `[tool.ruff]` in `pyproject.toml`
+    for the enabled rule set and per-file ignores.
   - `uv run python -m storyindex.app --db mylibrary.sqlite` — launch the
     web app.
   - `uv add <package>` / `uv remove <package>` — change dependencies;
@@ -103,6 +109,11 @@ what the project does and how to run it.
 - `src/storyindex/app.py` — Flask routes + view logic.
 - `src/storyindex/db.py` — schema and all SQL.
 - `src/storyindex/jobs.py` — background job runner (subprocess entry point).
+- `src/storyindex/scheduler.py` — persistent round-robin scheduler for
+  `extract` jobs specifically (keeps a model's KV-cache warm across a
+  job's own calls instead of interleaving with other jobs' differently-
+  prefixed prompts); `cluster`/`sync` jobs each just run as their own
+  detached subprocess via `app._spawn_job` instead.
 - `src/storyindex/classify.py`, `cluster.py` — the two local-model tagging
   passes.
 - `src/storyindex/adapters/` — `SiteAdapter` protocol + generic/example
@@ -113,8 +124,8 @@ what the project does and how to run it.
 - `src/storyindex/templates/` — Jinja templates; `_macros.html` holds the
   shared building blocks (see above).
 - `scripts/` — standalone CLI drivers (`parse_site.py`, `extract_tags.py`,
-  `cluster_tags.py`) that wrap the same library code the web app's job
-  runner uses.
+  `cluster_tags.py`, `sync_archive.py`) that wrap the same library code the
+  web app's job runner uses.
 - `docs/crawler-parser-contract.md` — the crawl→parse contract, privacy
   rules, and `StorySignature` field-by-field spec.
 - `tests/` — one file per module/feature area; `tests/conftest.py` has the

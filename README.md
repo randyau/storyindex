@@ -242,6 +242,13 @@ Tests use a temp SQLite file per test and never call a real Ollama server —
 model calls are monkeypatched. No network access is required to run the
 suite.
 
+```bash
+uv run ruff check .
+```
+
+Lint is clean at every commit; `ruff` comes in via the `dev` extra
+(`uv sync --extra dev`), same as `pytest`.
+
 ### Privacy constraints (load-bearing, not just style)
 
 - Story text and embeddings never leave the machine. The only network calls
@@ -250,3 +257,7 @@ suite.
 - Real source domains never appear in this repo, in commit history, or in
   anything a `StorySignature` carries — see
   `docs/crawler-parser-contract.md` section 3 for the exact field rules.
+
+### License
+
+MIT — see [`LICENSE`](LICENSE).

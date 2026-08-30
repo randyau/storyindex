@@ -124,12 +124,14 @@ class SiteAdapter:
     def part_index(self, relpath: str) -> int:
         """Order within the group. 0 for standalone / first part."""
 
-    def extract(self, html: str) -> ExtractedFields:
+    def extract(self, html: str, relpath: str = "") -> ExtractedFields:
         """Returns {title, author, body_text, tags}. body_text is plain
         text, paragraphs separated by \\n\\n, no HTML/scripts/nav/boilerplate.
         tags is a list of site-provided category codes/strings, or [] if the
         source site doesn't have any — see section 3a, these are NOT the
-        same thing as the local-LLM tag pipeline's output."""
+        same thing as the local-LLM tag pipeline's output. relpath is
+        optional (the driver passes it if extract() takes a second
+        parameter) — useful for filename-derived fallbacks."""
 ```
 
 Driver behavior:

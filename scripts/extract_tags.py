@@ -50,7 +50,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--site-tags-vocab", type=Path, default=None,
-        help="optional code->label JSON (from parse_site_a.py --vocab-out) to "
+        help="optional code->label JSON (from parse_site.py --vocab-out) to "
              "backfill nicer site_tags labels",
     )
     args = parser.parse_args()

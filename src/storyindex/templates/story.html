@@ -40,7 +40,8 @@
 <p class="muted">
   {{ pending|length }} tag{{ 's' if pending|length != 1 }} awaiting review —
   {{ m.action_form(url_for('approve_all_tags', story_id=story['id']), 'approve all') }}
-  {{ m.action_form(url_for('reject_all_tags', story_id=story['id']), 'reject all') }}
+  {{ m.action_form(url_for('reject_all_tags', story_id=story['id']), 'reject all',
+                    confirm='Reject every pending tag on this story?') }}
 </p>
 {% endif %}
 

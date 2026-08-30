@@ -23,7 +23,9 @@ Approve to keep a tag (folds it into the human-confirmed set), reject to drop it
   {% endfor %}
   </p>
   {{ m.action_form(url_for('approve_all_tags', story_id=item['story']['id']), 'approve all', hidden={'next': url_for('review_stories_queue', page=page, job_id=job_id)}) }}
-  {{ m.action_form(url_for('reject_all_tags', story_id=item['story']['id']), 'reject all', hidden={'next': url_for('review_stories_queue', page=page, job_id=job_id)}) }}
+  {{ m.action_form(url_for('reject_all_tags', story_id=item['story']['id']), 'reject all',
+                    confirm='Reject every pending tag on this story?',
+                    hidden={'next': url_for('review_stories_queue', page=page, job_id=job_id)}) }}
 </div>
 {% else %}
 <p class="muted">nothing pending — the review queue is clear.</p>

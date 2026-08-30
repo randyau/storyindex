@@ -211,6 +211,11 @@ JOBS_PAGE_SIZE = 25
 TAGS_PAGE_SIZE = 50
 
 
+def _page_and_offset(page_size: int, param: str = "page") -> tuple[int, int]:
+    page = max(request.args.get(param, 1, type=int), 1)
+    return page, (page - 1) * page_size
+
+
 def _parse_tag_ids(raw: str) -> list[int]:
     ids = []
     for part in raw.split(","):
@@ -252,8 +257,7 @@ def index():
                 exclude_ids = exclude_ids + [row["id"]]
         return redirect(_filter_url(q, include_ids, exclude_ids))
 
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PAGE_SIZE
+    page, offset = _page_and_offset(PAGE_SIZE)
     stories = db.search_stories(
         conn, q, include_tag_ids=include_ids, exclude_tag_ids=exclude_ids,
         limit=PAGE_SIZE, offset=offset,
@@ -315,8 +319,7 @@ def tag_detail(tag_id: int):
     tag = db.get_tag(conn, tag_id)
     if tag is None:
         return "tag not found", 404
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PAGE_SIZE
+    page, offset = _page_and_offset(PAGE_SIZE)
     stories = db.stories_for_tag(conn, tag_id, limit=PAGE_SIZE, offset=offset)
     total = db.count_stories_for_tag(conn, tag_id)
     return render_template(
@@ -332,8 +335,7 @@ def site_tag_detail(code: str):
     tag = db.get_site_tag(conn, code)
     if tag is None:
         return "tag not found", 404
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PAGE_SIZE
+    page, offset = _page_and_offset(PAGE_SIZE)
     stories = db.stories_for_site_tag(conn, code, limit=PAGE_SIZE, offset=offset)
     total = db.count_stories_for_site_tag(conn, code)
     return render_template(
@@ -364,8 +366,7 @@ def story_detail(story_id: str):
 @app.route("/stories/removed")
 def removed_stories():
     conn = get_db()
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PAGE_SIZE
+    page, offset = _page_and_offset(PAGE_SIZE)
     stories = db.list_removed_stories(conn, limit=PAGE_SIZE, offset=offset)
     total = db.count_removed_stories(conn)
     return render_template(
@@ -399,8 +400,7 @@ def new_story():
 @app.route("/author/<path:author>")
 def author_detail(author: str):
     conn = get_db()
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PAGE_SIZE
+    page, offset = _page_and_offset(PAGE_SIZE)
     stories = db.stories_for_author(conn, author, limit=PAGE_SIZE, offset=offset)
     total = db.count_stories_for_author(conn, author)
     return render_template(
@@ -487,9 +487,8 @@ def review_queue():
     pending under it, so a reviewer can spot-check the actual stories
     before bulk-approving or -rejecting."""
     conn = get_db()
-    page = max(request.args.get("page", 1, type=int), 1)
+    page, offset = _page_and_offset(TAGS_PAGE_SIZE)
     job_id = request.args.get("job_id", type=int)
-    offset = (page - 1) * TAGS_PAGE_SIZE
     tags = db.pending_review_tags(conn, limit=TAGS_PAGE_SIZE, offset=offset, job_id=job_id)
     total = db.count_pending_review_tags(conn, job_id=job_id)
     stories_by_tag = db.pending_review_stories_for_tags(conn, [t["id"] for t in tags], job_id=job_id)
@@ -525,9 +524,8 @@ def review_stories_queue():
     the tag-centric /review view above is too coarse (e.g. double-checking
     one specific story's full tag set)."""
     conn = get_db()
-    page = max(request.args.get("page", 1, type=int), 1)
+    page, offset = _page_and_offset(PAGE_SIZE)
     job_id = request.args.get("job_id", type=int)
-    offset = (page - 1) * PAGE_SIZE
     items = db.stories_pending_review(conn, limit=PAGE_SIZE, offset=offset, job_id=job_id)
     total = db.count_pending_review(conn, job_id=job_id)
     job = db.get_job(conn, job_id) if job_id else None
@@ -572,8 +570,7 @@ def prompts_list():
         _seed_default_prompt(conn)
         conn.commit()
     q = request.args.get("q", "").strip()
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * PROMPTS_PAGE_SIZE
+    page, offset = _page_and_offset(PROMPTS_PAGE_SIZE)
     prompts = db.list_prompts(conn, q=q or None, limit=PROMPTS_PAGE_SIZE, offset=offset)
     total = db.count_prompts(conn, q=q or None)
     return render_template(
@@ -694,8 +691,7 @@ def jobs_list():
         prompts = db.list_prompts(conn)
     status = request.args.get("status", "").strip()
     type_ = request.args.get("type", "").strip()
-    page = max(request.args.get("page", 1, type=int), 1)
-    offset = (page - 1) * JOBS_PAGE_SIZE
+    page, offset = _page_and_offset(JOBS_PAGE_SIZE)
     jobs = db.list_jobs(conn, limit=JOBS_PAGE_SIZE, offset=offset, status=status or None, type=type_ or None)
     total = db.count_jobs(conn, status=status or None, type=type_ or None)
     return render_template(
@@ -927,14 +923,12 @@ def rename_library_route():
 def tags_admin():
     conn = get_db()
     tag_q = request.args.get("tag_q", "").strip()
-    tag_page = max(request.args.get("tag_page", 1, type=int), 1)
-    tag_offset = (tag_page - 1) * TAGS_PAGE_SIZE
+    tag_page, tag_offset = _page_and_offset(TAGS_PAGE_SIZE, "tag_page")
     tags = db.list_tags_with_counts(conn, q=tag_q or None, limit=TAGS_PAGE_SIZE, offset=tag_offset)
     tag_total = db.count_tags(conn, q=tag_q or None)
 
     site_q = request.args.get("site_q", "").strip()
-    site_page = max(request.args.get("site_page", 1, type=int), 1)
-    site_offset = (site_page - 1) * TAGS_PAGE_SIZE
+    site_page, site_offset = _page_and_offset(TAGS_PAGE_SIZE, "site_page")
     site_tags = db.list_site_tags_with_counts(conn, q=site_q or None, limit=TAGS_PAGE_SIZE, offset=site_offset)
     site_total = db.count_site_tags(conn, q=site_q or None)
 

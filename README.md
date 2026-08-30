@@ -7,12 +7,23 @@ small web UI. Everything stays on your machine — no story text or embedding
 ever leaves it, and the only network calls this tool makes are to a local
 Ollama server on `localhost`.
 
+Despite the name, nothing about the pipeline is fiction-specific. A "story"
+is just this tool's word for one document in your corpus — the same
+ingest → prompt-driven tag extraction → clustering → browse/search flow
+works for any batch of text you'd want to run the same extraction prompt
+over: academic papers in a field, OCR'd comic/manga scans converted to
+text, a folder of articles, whatever. The only two requirements are that
+each item is (or can be turned into) plain text/HTML on disk, and that
+you write an extraction prompt suited to what you're tagging (see
+`/prompts` in the app) instead of reusing the shipped fiction-trope one.
+
 ## What it does
 
-- **Ingest** a folder of story files into a local SQLite database, either via
-  a zero-code generic parser (filename-as-title, optional regexes, batch
-  tagging) or a hand-written `SiteAdapter` for archives with real structure
-  (multi-part chapters, per-story index pages, etc).
+- **Ingest** a folder of text/HTML files — story pages, papers, OCR'd
+  scans, anything with a title and a body — into a local SQLite database,
+  either via a zero-code generic parser (filename-as-title, optional
+  regexes, batch tagging) or a hand-written `SiteAdapter` for archives
+  with real structure (multi-part chapters, per-item index pages, etc).
 - **Tag** stories two ways: by hand, or via a two-pass local-model pipeline
   (free-form extraction → embedding-based clustering into a canonical
   vocabulary), with a review queue for approving/rejecting model proposals.

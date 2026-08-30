@@ -5,6 +5,14 @@ against the live site) and the parser (lives in this repo, reads the wget archiv
 emits `StorySignature` records). Nothing but `StorySignature` JSON ever crosses from
 crawler output into the rest of this system.
 
+wget-against-a-live-site is the worked example throughout, since that's what this
+was originally built for, but "crawler" here really just means "whatever produced
+the folder of text/HTML files on disk" - a batch PDF→text conversion, an OCR pass
+over scanned comics/manga, a folder of papers exported from a reference manager,
+anything. The parser side of the contract (adapter reads files under `archive/`,
+emits `StorySignature`s) doesn't know or care how those files got there; only
+section 1 below is wget-specific.
+
 ## 1. Crawl step (wget)
 
 Run from a machine/process outside this repo. Produces a mirrored directory tree,

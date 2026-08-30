@@ -42,7 +42,9 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 def _spawn_job(job_id: int) -> None:
     """Launch the job runner as a detached subprocess so the request that
     created the job returns immediately — the app stays usable (browse,
-    read, review other stories) while the job runs in the background."""
+    read, review other stories) while the job runs in the background.
+
+    Not used for `extract` jobs — see _ensure_scheduler_running below."""
     env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
     subprocess.Popen(
         [sys.executable, "-m", "storyindex.jobs", "--job-id", str(job_id), "--db", str(app.config["DB_PATH"])],
@@ -51,6 +53,46 @@ def _spawn_job(job_id: int) -> None:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+
+
+def _scheduler_pidfile() -> Path:
+    return Path(str(app.config["DB_PATH"]) + ".scheduler.pid")
+
+
+def _ensure_scheduler_running() -> None:
+    """Make sure the singleton extract-job scheduler (scheduler.py) is
+    alive, spawning it if not. One process handles every queued/running
+    extract job for this DB - see scheduler.py's module docstring for why
+    that matters (prefix-cache locality across a job's own calls)."""
+    pidfile = _scheduler_pidfile()
+    if pidfile.exists():
+        try:
+            pid = int(pidfile.read_text().strip())
+        except ValueError:
+            pid = None
+        if pid is not None and db._pid_alive(pid):
+            return
+    env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "storyindex.scheduler", "--db", str(app.config["DB_PATH"])],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    pidfile.write_text(str(proc.pid))
+
+
+def _ensure_scheduler_if_extract_jobs_pending(conn: sqlite3.Connection) -> None:
+    """Self-healing hook: if the scheduler process dies mid-session (OOM,
+    an uncaught exception, `kill -9`) while the app itself keeps running,
+    nothing else respawns it - reap_dead_pid_jobs only fails jobs that were
+    already 'running' with a dead pid, but a job still 'queued' (never
+    picked up yet) has no pid to notice is dead, so it would sit queued
+    forever with no scheduler left to serve it. Call this from any
+    jobs-related view so a page load is enough to notice and respawn."""
+    if db.count_jobs(conn, status="queued", type="extract") or db.count_jobs(conn, status="running", type="extract"):
+        _ensure_scheduler_running()
 
 
 def get_db() -> sqlite3.Connection:
@@ -439,9 +481,14 @@ def revert_job(job_id: int):
 @app.route("/jobs/<int:job_id>/cancel", methods=["POST"])
 def cancel_job(job_id: int):
     conn = get_db()
+    job = db.get_job(conn, job_id)
     pid = db.cancel_job(conn, job_id, _now())
     conn.commit()
-    if pid is not None:
+    # extract jobs share one scheduler process's pid across many jobs
+    # (see _ensure_scheduler_running) - marking the row failed is enough
+    # for the scheduler to drop it on its next pass, and SIGTERM-ing that
+    # pid would kill every other extract job it's currently working too.
+    if pid is not None and job is not None and job["type"] != "extract":
         import signal
         try:
             os.kill(pid, signal.SIGTERM)
@@ -571,6 +618,7 @@ def jobs_list():
     conn = get_db()
     if db.reap_dead_pid_jobs(conn, _now()):
         conn.commit()
+    _ensure_scheduler_if_extract_jobs_pending(conn)
     prompts = db.list_prompts(conn)
     if not prompts:
         _seed_default_prompt(conn)
@@ -611,6 +659,9 @@ def job_detail(job_id: int):
 @app.route("/jobs/<int:job_id>/status.json")
 def job_status_json(job_id: int):
     conn = get_db()
+    if db.reap_dead_pid_jobs(conn, _now()):
+        conn.commit()
+    _ensure_scheduler_if_extract_jobs_pending(conn)
     job = db.get_job(conn, job_id)
     if job is None:
         return {"error": "not found"}, 404
@@ -630,7 +681,7 @@ def create_extract_job():
         return redirect(url_for("jobs_list"))
     job_id = db.create_job(conn, "extract", _now(), prompt_id=prompt_id, model=model, scope=scope)
     conn.commit()
-    _spawn_job(job_id)
+    _ensure_scheduler_running()
     return redirect(url_for("job_detail", job_id=job_id))
 
 
@@ -825,9 +876,10 @@ def main() -> None:
     conn = db.connect(app.config["DB_PATH"])
     reaped = db.reap_stale_jobs(conn, _now())
     conn.commit()
-    conn.close()
     if reaped:
         print(f"recovered from an unclean shutdown: marked {len(reaped)} stuck job(s) failed: {reaped}")
+    _ensure_scheduler_if_extract_jobs_pending(conn)
+    conn.close()
 
     app.run(host=args.host, port=args.port, debug=False)
 

@@ -68,7 +68,44 @@ def _scope_stories(conn: sqlite3.Connection, scope: str | None) -> list[sqlite3.
     return rows
 
 
+def process_extract_item(
+    conn: sqlite3.Connection,
+    job_id: int,
+    model: str,
+    prompt_text: str,
+    prompt_name: str,
+    row: sqlite3.Row,
+    host: str,
+) -> None:
+    """Run extraction for one story and record the outcome (candidates or
+    a job_error) against job_id. Shared by run_extract_job's own single-job
+    loop and scheduler.py's cross-job block loop, so both paths behave
+    identically on a per-story basis."""
+    sig = row_to_sig(row)
+    try:
+        tags = extract_tags(sig, model=model, prompt_text=prompt_text, host=host)
+    except ExtractionError as exc:
+        db.increment_job_progress(conn, job_id, failed=1)
+        db.record_job_error(conn, job_id, f"{row['title']} ({row['id']})", str(exc), _now())
+    else:
+        db.insert_candidates(
+            conn, story_id=row["id"], tags=tags,
+            prompt_version=prompt_name, model=model,
+            created_at=_now(), job_id=job_id,
+        )
+        db.increment_job_progress(conn, job_id, done=1)
+
+
 def run_extract_job(db_path: Path, job_id: int) -> None:
+    """Standalone single-job runner - still used directly by the CLI
+    (`python -m storyindex.jobs`) and by tests. The web app no longer
+    spawns this for `extract` jobs (see app._ensure_scheduler_running /
+    scheduler.py): running multiple extract jobs as independent processes
+    means their Ollama calls interleave in whatever order the OS happens
+    to schedule them, and each job's prompt has a different fixed
+    instruction prefix - so every single call becomes a full prefix-cache
+    miss instead of reusing the previous call's prefix. The scheduler
+    keeps one job's calls consecutive in blocks instead."""
     conn = db.connect(db_path)
     try:
         job = db.get_job(conn, job_id)
@@ -89,19 +126,7 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
         host = settings.load()["ollama_host"]
         since_commit = 0
         for row in stories:
-            sig = row_to_sig(row)
-            try:
-                tags = extract_tags(sig, model=job["model"], prompt_text=prompt["text"], host=host)
-            except ExtractionError as exc:
-                db.increment_job_progress(conn, job_id, failed=1)
-                db.record_job_error(conn, job_id, f"{row['title']} ({row['id']})", str(exc), _now())
-            else:
-                db.insert_candidates(
-                    conn, story_id=row["id"], tags=tags,
-                    prompt_version=prompt["name"], model=job["model"],
-                    created_at=_now(), job_id=job_id,
-                )
-                db.increment_job_progress(conn, job_id, done=1)
+            process_extract_item(conn, job_id, job["model"], prompt["text"], prompt["name"], row, host)
             since_commit += 1
             if since_commit >= EXTRACT_COMMIT_EVERY:
                 conn.commit()

@@ -447,8 +447,9 @@ def restore_story(story_id: str):
 def tags_autocomplete():
     conn = get_db()
     q = request.args.get("q", "").strip()
-    if not q:
-        return {"tags": []}
+    # Empty query still returns the most-used tags, so a picker can show a
+    # starter list on focus instead of staying blank until the user already
+    # knows a name to type.
     rows = db.search_tag_names(conn, q, limit=20)
     return {"tags": [{"id": r["id"], "name": r["name"], "count": r["story_count"]} for r in rows]}
 

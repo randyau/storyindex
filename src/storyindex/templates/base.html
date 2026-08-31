@@ -128,31 +128,36 @@
 // /tags/autocomplete.json as the user types - keeps tag pickers usable
 // with hundreds/thousands of tags instead of dumping every tag name into
 // the page at once. Debounced; ignores stale responses that resolve after
-// a newer keystroke.
+// a newer keystroke. Also fires once on focus with an empty query, which
+// the endpoint answers with the most-used tags, so a starter list of
+// options shows up before the user has typed anything to search for.
 function attachTagAutocomplete(inputId, datalistId) {
   var input = document.getElementById(inputId);
   var datalist = document.getElementById(datalistId);
   if (!input || !datalist) return;
   var timer = null;
   var seq = 0;
+  function fetchOptions(q) {
+    var mySeq = ++seq;
+    fetch("{{ url_for('tags_autocomplete') }}?q=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (mySeq !== seq) return;
+        datalist.innerHTML = "";
+        (data.tags || []).forEach(function (t) {
+          var opt = document.createElement("option");
+          opt.value = t.name;
+          datalist.appendChild(opt);
+        });
+      });
+  }
+  input.addEventListener("focus", function () {
+    if (!input.value.trim()) fetchOptions("");
+  });
   input.addEventListener("input", function () {
     var q = input.value.trim();
     clearTimeout(timer);
-    if (!q) { datalist.innerHTML = ""; return; }
-    var mySeq = ++seq;
-    timer = setTimeout(function () {
-      fetch("{{ url_for('tags_autocomplete') }}?q=" + encodeURIComponent(q))
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (mySeq !== seq) return;
-          datalist.innerHTML = "";
-          (data.tags || []).forEach(function (t) {
-            var opt = document.createElement("option");
-            opt.value = t.name;
-            datalist.appendChild(opt);
-          });
-        });
-    }, 150);
+    timer = setTimeout(function () { fetchOptions(q); }, 150);
   });
 }
 </script>

@@ -51,7 +51,7 @@ def test_index_tag_cloud_is_capped_with_see_all_link(tmp_path, make_sig, monkeyp
     client = _client(dbpath)
     r = client.get("/")
     body = r.get_data(as_text=True)
-    assert "see all" in body
+    assert "browse all tags" in body
     assert "/tags" in body
 
 
@@ -71,8 +71,11 @@ def test_tags_autocomplete_json(tmp_path, make_sig):
     names = {t["name"] for t in data["tags"]}
     assert names == {"battle of wits", "battlefield tactics"}
 
+    # An empty query still returns a starter list (most-used tags first),
+    # so a picker can show options on focus before the user types anything.
     r = client.get("/tags/autocomplete.json")
-    assert r.get_json() == {"tags": []}
+    empty_q_names = {t["name"] for t in r.get_json()["tags"]}
+    assert empty_q_names == {"battle of wits", "battlefield tactics", "sherlock holmes"}
 
 
 def test_index_add_tag_filter_by_typed_name_resolves_and_redirects(tmp_path, make_sig):

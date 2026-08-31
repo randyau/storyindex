@@ -28,7 +28,8 @@ coding required — a "no adapter needed" mode is available), or
 
 <h2>tags</h2>
 <p class="muted">click a tag to require it, or "exclude" to rule it out — e.g. "battle of wits" + exclude "sherlock holmes".
-{% if total_tag_count > tags|length %}showing the {{ tags|length }} most-used of {{ total_tag_count }} — <a href="{{ url_for('tags_admin') }}">see all →</a>{% endif %}
+{% if total_tag_count > tags|length %}showing the {{ tags|length }} most-used of {{ total_tag_count }}.{% endif %}
+<a href="{{ url_for('tags_admin') }}">browse all tags →</a>
 </p>
 <form method="get" action="{{ url_for('index') }}">
   <input type="hidden" name="q" value="{{ q }}">

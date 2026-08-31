@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m with context %}
-{% block title %}review queue — storyindex{% endblock %}
+{% block title %}results — storyindex{% endblock %}
 {% block content %}
-<h2>review queue{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
+<h2>results{% if job %} — job #{{ job['id'] }}{% endif %}</h2>
 <p class="muted">
 {{ total }} tag{{ 's' if total != 1 }} with model-proposed links still awaiting approval, most-applied first.
-Approving a tag keeps it everywhere it's pending; rejecting drops it everywhere it's pending.
+These tags are already live in browse and search — approving marks a tag's links to these stories as human-reviewed instead of model-proposed; rejecting removes those links.
 Expand a tag to spot-check the stories it landed on before deciding.
 <a href="{{ url_for('review_stories_queue', job_id=job_id) }}">switch to per-story view</a>
 {% if job_id %}· <a href="{{ url_for('review_queue') }}">show all pending, not just this job</a>{% endif %}
@@ -25,7 +25,7 @@ Expand a tag to spot-check the stories it landed on before deciding.
                     hidden={'job_id': job_id or '', 'next': url_for('review_queue', page=page, job_id=job_id)}) }}
 </details>
 {% else %}
-<p class="muted">nothing pending — the review queue is clear.</p>
+<p class="muted">nothing pending — results are clear.</p>
 {% endfor %}
 
 {{ m.pager(page, has_next, 'review_queue', {'job_id': job_id}) }}

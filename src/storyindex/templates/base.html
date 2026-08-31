@@ -101,14 +101,14 @@
 <body>
 <nav>
   <a href="{{ url_for('index') }}">browse</a>
-  <a href="{{ url_for('review_queue') }}">review queue</a>
-  <a href="{{ url_for('tags_admin') }}">tags</a>
   <a href="{{ url_for('prompts_list') }}">prompts</a>
   <a href="{{ url_for('jobs_list') }}">jobs</a>
   <a href="{{ url_for('scheduler_status') }}">scheduler</a>
+  <a href="{{ url_for('review_queue') }}">results</a>
   <details>
     <summary>manage ▾</summary>
     <div class="nav-menu">
+      <a href="{{ url_for('tags_admin') }}">tags</a>
       <a href="{{ url_for('new_story') }}">add a story</a>
       <a href="{{ url_for('removed_stories') }}">removed stories</a>
       <a href="{{ url_for('libraries_list') }}">libraries</a>

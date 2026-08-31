@@ -90,7 +90,7 @@ def test_preview_prompt_on_specific_story(tmp_path, make_sig, monkeypatch):
     conn = db.connect(dbpath)
     db.upsert_story(conn, make_sig("s1", title="Target Story"))
     db.upsert_story(conn, make_sig("s2", title="Other Story"))
-    prompt_id = db.create_prompt(conn, "p", "text", "2026-01-01T00:00:00Z")
+    prompt_id = db.create_prompt(conn, "p", "some saved text", "2026-01-01T00:00:00Z")
     conn.commit()
     conn.close()
 
@@ -98,13 +98,48 @@ def test_preview_prompt_on_specific_story(tmp_path, make_sig, monkeypatch):
     client = _client(dbpath)
     r = client.post(
         "/story/s1/prompts/preview",
-        data={"prompt_id": str(prompt_id), "model": "m"},
+        data={"text": "a tweaked ad-hoc prompt", "based_on_id": str(prompt_id), "model": "m"},
     )
     assert r.status_code == 200
     body = r.get_data(as_text=True)
     assert "Target Story" in body
     assert "Other Story" not in body
     assert "theme-x" in body
+    assert "a tweaked ad-hoc prompt" in body
+
+
+def test_preview_prompt_on_story_requires_text(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1"))
+    conn.commit()
+    conn.close()
+
+    client = _client(dbpath)
+    r = client.post("/story/s1/prompts/preview", data={"text": "", "model": "m"})
+    assert r.status_code == 404
+
+
+def test_save_prompt_from_preview_creates_prompt_and_redirects_to_story(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1"))
+    conn.commit()
+    conn.close()
+
+    client = _client(dbpath)
+    r = client.post(
+        "/prompts/save-from-preview",
+        data={"name": "my tweaked prompt", "text": "find the dragons", "story_id": "s1"},
+    )
+    assert r.status_code == 302
+    assert r.headers["Location"] == "/story/s1"
+
+    conn = db.connect(dbpath)
+    prompts = db.list_prompts(conn)
+    assert len(prompts) == 1
+    assert prompts[0]["name"] == "my tweaked prompt"
+    assert prompts[0]["text"] == "find the dragons"
 
 
 def test_jobs_list_seeds_and_renders(tmp_path):

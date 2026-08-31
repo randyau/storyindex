@@ -464,6 +464,21 @@ def add_tag(story_id: str):
     return redirect(url_for("story_detail", story_id=story_id))
 
 
+@app.route("/story/<story_id>/tags/bulk", methods=["POST"])
+def add_tags_bulk(story_id: str):
+    """Apply several tag names to one story at once — backs the "add all"
+    button on a one-off prompt preview (see preview_prompt_on_story), so
+    accepting a preview's results doesn't mean clicking "+ add" per tag."""
+    conn = get_db()
+    now = _now()
+    for name in request.form.getlist("name"):
+        name = name.strip().lower()
+        if name:
+            db.add_story_tag_by_name(conn, story_id, name, created_at=now, source="human")
+    conn.commit()
+    return redirect(url_for("story_detail", story_id=story_id))
+
+
 @app.route("/story/<story_id>/tags/<int:tag_id>/delete", methods=["POST"])
 def delete_tag(story_id: str, tag_id: int):
     conn = get_db()
@@ -652,15 +667,46 @@ def preview_prompt(prompt_id: int):
 
 @app.route("/story/<story_id>/prompts/preview", methods=["POST"])
 def preview_prompt_on_story(story_id: str):
+    """Preview arbitrary, unsaved prompt text against one story - the
+    "tweak until it gives you what you want" loop from the story page.
+    Takes raw `text` rather than a prompt_id so a prompt never needs to be
+    saved just to try it; `based_on_id`, if the user started from an
+    existing saved prompt, is threaded through so a later save can record
+    the lineage."""
     conn = get_db()
-    prompt_id = request.form.get("prompt_id", type=int)
-    prompt = db.get_prompt(conn, prompt_id) if prompt_id else None
     story = db.get_story(conn, story_id)
-    if prompt is None or story is None:
+    text = request.form.get("text", "").strip()
+    if story is None or not text:
         return "not found", 404
+    based_on_id = request.form.get("based_on_id", type=int)
+    based_on = db.get_prompt(conn, based_on_id) if based_on_id else None
     model = request.form.get("model", "").strip()
+    prompt = {"name": based_on["name"] if based_on else "custom prompt", "text": text}
     results = _run_prompt_preview(prompt, model, [story])
-    return render_template("prompt_preview.html", prompt=prompt, results=results, model=model, target_story=story)
+    return render_template(
+        "prompt_preview.html", prompt=prompt, results=results, model=model,
+        target_story=story, based_on_id=based_on_id,
+    )
+
+
+@app.route("/prompts/save-from-preview", methods=["POST"])
+def save_prompt_from_preview():
+    """Persist a prompt that was just tried out on the story page (see
+    preview_prompt_on_story) - the "save it once you like the results"
+    half of the throwaway-prompt workflow. Every save is a new prompt row
+    (see db.create_prompt), so this never mutates the prompt it was based
+    on even if the user started from one."""
+    conn = get_db()
+    name = request.form.get("name", "").strip()
+    text = request.form.get("text", "").strip()
+    based_on_id = request.form.get("based_on_id", type=int)
+    story_id = request.form.get("story_id", "").strip()
+    if name and text:
+        db.create_prompt(conn, name, text, _now(), based_on_id=based_on_id)
+        conn.commit()
+    if story_id:
+        return redirect(url_for("story_detail", story_id=story_id))
+    return redirect(url_for("prompts_list"))
 
 
 # --- ollama status/control -------------------------------------------------

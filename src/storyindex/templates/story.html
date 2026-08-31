@@ -109,18 +109,37 @@
         </p>
         {% endif %}
 
-        {% if prompts %}
-        <p class="muted">
+        <div class="muted">
+          <p>try a prompt on this story — tweak the text and preview until it gives
+          you the tags you want, then save it from the results page for reuse as a
+          real job.</p>
           <form method="post" action="{{ url_for('preview_prompt_on_story', story_id=story['id']) }}">
-            try a prompt on this story:<br>
-            <select name="prompt_id">
-              {% for p in prompts %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
-            </select>
-            <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:12rem">
+            {% if prompts %}
+            <label>start from:
+              <select id="prompt-load-select">
+                <option value="">(blank / custom)</option>
+                {% for p in prompts %}<option value="{{ p['id'] }}" data-text="{{ p['text'] }}">{{ p['name'] }}</option>{% endfor %}
+              </select>
+            </label>
+            <input type="hidden" name="based_on_id" id="prompt-based-on-id" value="">
+            {% endif %}
+            <textarea name="text" id="prompt-text-area" rows="5" style="width:100%" placeholder="write or paste a prompt..." required></textarea>
+            <label>model: <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:12rem"></label>
             <input type="submit" value="preview">
           </form>
-        </p>
-        {% endif %}
+          <script>
+          (function () {
+            var sel = document.getElementById("prompt-load-select");
+            var ta = document.getElementById("prompt-text-area");
+            var basedOn = document.getElementById("prompt-based-on-id");
+            if (!sel) return;
+            sel.addEventListener("change", function () {
+              ta.value = sel.options[sel.selectedIndex].getAttribute("data-text") || "";
+              basedOn.value = sel.value;
+            });
+          })();
+          </script>
+        </div>
       </div>
     </details>
   </aside>

@@ -3,13 +3,49 @@
 {% block content %}
 <h2>preview — {{ prompt['name'] }}</h2>
 <p class="muted">model: {{ model }}{% if target_story %} · targeted at "{{ target_story['title'] }}"{% endif %}</p>
+{% if target_story %}
+<p class="muted">nothing here is saved yet — add individual tags below to apply them to this story right away, or run the prompt as a real job from the <a href="{{ url_for('jobs_list') }}">jobs</a> page to apply it library-wide.</p>
+<details>
+  <summary class="muted">prompt text used</summary>
+  <pre>{{ prompt['text'] }}</pre>
+</details>
+<div class="review-item">
+  <h4>save this prompt</h4>
+  <p class="muted">not saved anywhere yet — name it to keep it for reuse (as a job, or to load and tweak again from this story's page).</p>
+  <form method="post" action="{{ url_for('save_prompt_from_preview') }}">
+    <input type="hidden" name="text" value="{{ prompt['text'] }}">
+    <input type="hidden" name="based_on_id" value="{{ based_on_id or '' }}">
+    <input type="hidden" name="story_id" value="{{ target_story['id'] }}">
+    <input type="text" name="name" placeholder="name this prompt..." required>
+    <input type="submit" value="save prompt">
+  </form>
+</div>
+{% else %}
 <p class="muted">nothing here is saved — run this as a real job from the <a href="{{ url_for('jobs_list') }}">jobs</a> page once you like the results.</p>
+{% endif %}
 
 {% for r in results %}
 <div class="review-item">
   <h4><a href="{{ url_for('story_detail', story_id=r['story']['id']) }}">{{ r['story']['title'] }}</a> <span class="muted">by {{ r['story']['author'] }}</span></h4>
   {% if r['error'] %}
   <p style="color:#a00">error: {{ r['error'] }}</p>
+  {% elif target_story %}
+  <p>
+  {% for t in r['tags'] %}
+    <span class="tag-pill">{{ t }}
+      <form method="post" action="{{ url_for('add_tag', story_id=target_story['id']) }}" style="display:inline">
+        <input type="hidden" name="name" value="{{ t }}">
+        <button title="add this tag to the story">+ add</button>
+      </form>
+    </span>
+  {% endfor %}
+  </p>
+  {% if r['tags'] %}
+  <form method="post" action="{{ url_for('add_tags_bulk', story_id=target_story['id']) }}">
+    {% for t in r['tags'] %}<input type="hidden" name="name" value="{{ t }}">{% endfor %}
+    <button>add all {{ r['tags']|length }} tags to this story</button>
+  </form>
+  {% endif %}
   {% else %}
   <p>
   {% for t in r['tags'] %}<span class="tag-pill">{{ t }}</span>{% endfor %}
@@ -20,5 +56,8 @@
 <p class="muted">no stories to preview against yet.</p>
 {% endfor %}
 
-<p><a href="{{ url_for('prompts_list') }}">← back to prompts</a></p>
+<p>
+{% if target_story %}<a href="{{ url_for('story_detail', story_id=target_story['id']) }}">← back to story</a> ·{% endif %}
+<a href="{{ url_for('prompts_list') }}">back to prompts</a>
+</p>
 {% endblock %}

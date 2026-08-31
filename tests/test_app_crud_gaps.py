@@ -32,6 +32,45 @@ def test_new_story_requires_title_and_body(tmp_path):
     conn.close()
 
 
+def test_open_original_streams_file_when_media_path_recorded(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    media_file = tmp_path / "paper.pdf"
+    media_file.write_bytes(b"%PDF-1.4 fake content")
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1", media_path=str(media_file)))
+    conn.commit()
+    conn.close()
+
+    client = _client(tmp_path)
+    r = client.get("/story/s1/open-original")
+    assert r.status_code == 200
+    assert r.data == b"%PDF-1.4 fake content"
+
+
+def test_open_original_404s_when_no_media_path(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1"))
+    conn.commit()
+    conn.close()
+
+    client = _client(tmp_path)
+    r = client.get("/story/s1/open-original")
+    assert r.status_code == 404
+
+
+def test_open_original_404s_when_file_missing_on_disk(tmp_path, make_sig):
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    db.upsert_story(conn, make_sig("s1", media_path=str(tmp_path / "gone.pdf")))
+    conn.commit()
+    conn.close()
+
+    client = _client(tmp_path)
+    r = client.get("/story/s1/open-original")
+    assert r.status_code == 404
+
+
 def test_removed_stories_list_and_restore(tmp_path, make_sig):
     dbpath = tmp_path / "t.sqlite"
     conn = db.connect(dbpath)

@@ -170,6 +170,7 @@ _ADDITIVE_COLUMNS = [
     ("jobs", "reverted_at", "TEXT"),
     ("jobs", "last_block_seconds", "REAL"),
     ("jobs", "last_block_items", "INTEGER"),
+    ("stories", "media_path", "TEXT"),
 ]
 
 
@@ -220,8 +221,9 @@ def _is_initialized(conn: sqlite3.Connection) -> bool:
     }
     if "job_errors" not in tables or "stories_fts" not in tables:
         return False
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
-    return "last_block_items" in cols
+    job_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    story_cols = {row[1] for row in conn.execute("PRAGMA table_info(stories)")}
+    return "last_block_items" in job_cols and "media_path" in story_cols
 
 
 def _ensure_fts(conn: sqlite3.Connection) -> None:
@@ -283,8 +285,8 @@ def upsert_story(conn: sqlite3.Connection, sig) -> None:
         """
         INSERT INTO stories
             (id, group_id, part_index, title, author, body_text,
-             source_relpath, content_hash, ingested_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             source_relpath, content_hash, ingested_at, media_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             group_id=excluded.group_id,
             part_index=excluded.part_index,
@@ -293,7 +295,8 @@ def upsert_story(conn: sqlite3.Connection, sig) -> None:
             body_text=excluded.body_text,
             source_relpath=excluded.source_relpath,
             content_hash=excluded.content_hash,
-            ingested_at=excluded.ingested_at
+            ingested_at=excluded.ingested_at,
+            media_path=excluded.media_path
         """,
         (
             sig.id,
@@ -305,6 +308,7 @@ def upsert_story(conn: sqlite3.Connection, sig) -> None:
             sig.source_relpath,
             sig.content_hash,
             sig.ingested_at,
+            getattr(sig, "media_path", None),
         ),
     )
     for code in getattr(sig, "tags", ()):

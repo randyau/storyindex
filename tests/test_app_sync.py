@@ -59,6 +59,27 @@ def test_sync_custom_mode_uses_given_adapter(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_sync_generic_mode_save_media_path_checkbox(tmp_path, monkeypatch):
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    (archive_root / "my_first_story.txt").write_text("Once upon a time.", encoding="utf-8")
+    dbpath = tmp_path / "t.sqlite"
+    client = _client(tmp_path, dbpath, monkeypatch)
+
+    r = client.post("/jobs/sync", data={
+        "mode": "generic",
+        "archive_root": str(archive_root),
+        "glob": "*.txt",
+        "save_media_path": "on",
+    }, follow_redirects=True)
+    assert r.status_code == 200
+
+    conn = db.connect(dbpath)
+    story = conn.execute("SELECT media_path FROM stories").fetchone()
+    assert story[0] == str(archive_root / "my_first_story.txt")
+    conn.close()
+
+
 def test_sync_missing_archive_root_redirects_without_job(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.sqlite"
     client = _client(tmp_path, dbpath, monkeypatch)

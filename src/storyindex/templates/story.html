@@ -15,6 +15,10 @@
 
 {{ m.chapter_nav(story, parts) }}
 
+{% if story['media_path'] %}
+<p><a href="{{ url_for('open_original', story_id=story['id']) }}">open original file</a></p>
+{% endif %}
+
 <h3>tags</h3>
 <p>
 {% for st in site_tags %}

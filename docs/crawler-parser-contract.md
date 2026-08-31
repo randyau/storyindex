@@ -194,7 +194,8 @@ this repo's ingestion step consumes.
   "source_relpath": "authors/j-smith/story-1.html",
   "content_hash": "sha1(body_text)",
   "ingested_at": "2026-08-26T00:00:00Z",
-  "tags": ["mc", "mf", "md"]
+  "tags": ["mc", "mf", "md"],
+  "media_path": null
 }
 ```
 
@@ -211,10 +212,11 @@ Field rules:
 | `content_hash` | `sha1` of `body_text`, distinct from `id`. Lets the indexer detect a changed source page (re-tag) vs. a genuinely new story (`id` unchanged, `content_hash` changed). |
 | `ingested_at` | UTC timestamp of when the parser produced this signature (not the original crawl time). |
 | `tags` | Optional, defaults to `[]`. Site-provided category codes/strings, read straight off the source page (e.g. a controlled vocabulary the site already maintains). Never touched by the local-LLM extraction/clustering pipeline. |
+| `media_path` | Optional, defaults to `null`. Absolute local filesystem path to the original file (a PDF, a comic-OCR text batch, etc), recorded only when the caller opts in (`--save-media-path` on `scripts/parse_site.py`/`scripts/sync_archive.py`, or the "save each file's path" checkbox on the web sync form). Powers the story page's "open original" link. This is deliberately different from `source_relpath`: it's a local-filesystem detail from a directory import, never a scraped site's own path, so it carries no domain-privacy concern — leave it `null` for anything web-crawled. |
 
-Nothing else crosses the boundary. No raw HTML, no live URLs, no crawler
-internals — only these signature files reach the indexer/tagging side of the
-system.
+Nothing else crosses the boundary except that one opt-in exception. No raw
+HTML, no live URLs, no crawler internals — only these signature files reach
+the indexer/tagging side of the system.
 
 ## 3a. Site-provided tags vs. LLM-derived tags
 

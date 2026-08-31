@@ -16,7 +16,7 @@ def conn(tmp_path):
 
 
 class FakeSig:
-    def __init__(self, id_, title="Title", author="Author", body="Once upon a time.", tags=()):
+    def __init__(self, id_, title="Title", author="Author", body="Once upon a time.", tags=(), media_path=None):
         self.id = id_
         self.group_id = id_
         self.part_index = 0
@@ -27,6 +27,7 @@ class FakeSig:
         self.content_hash = "h" + id_
         self.ingested_at = "2026-01-01T00:00:00Z"
         self.tags = tags
+        self.media_path = media_path
 
 
 @pytest.fixture()

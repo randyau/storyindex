@@ -26,6 +26,7 @@ from pathlib import Path
 from storyindex import db, ollama_client, settings
 from storyindex.classify import ExtractionError, extract_tags
 from storyindex.cluster import DEFAULT_EMBED_MODEL, canonical_name, cluster_tag_texts
+from storyindex.file_text import read_file_text
 from storyindex.signature import StorySignature
 
 COMMIT_EVERY = 10
@@ -48,7 +49,7 @@ def row_to_sig(row: sqlite3.Row) -> StorySignature:
         id=row["id"], group_id=row["group_id"], part_index=row["part_index"],
         title=row["title"], author=row["author"], body_text=row["body_text"],
         source_relpath=row["source_relpath"], content_hash=row["content_hash"],
-        ingested_at=row["ingested_at"],
+        ingested_at=row["ingested_at"], media_path=row["media_path"],
     )
 
 
@@ -305,6 +306,7 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
         adapter_class = _load_adapter_class(adapter_spec)
         adapter = _build_adapter(adapter_class, archive_root, params.get("config"))
         patterns = [p.strip() for p in (params.get("glob") or "*.html").split(",") if p.strip()]
+        save_media_path = bool(params.get("save_media_path"))
 
         paths = []
         seen: set[Path] = set()
@@ -325,7 +327,7 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
         for path in paths:
             relpath = path.relative_to(archive_root).as_posix()
             try:
-                html_text = path.read_text(encoding="utf-8", errors="replace")
+                html_text = read_file_text(path)
                 fields = _call_extract(adapter, html_text, relpath)
                 group_key = adapter.group_key(relpath)
                 part_idx = adapter.part_index(relpath)
@@ -334,6 +336,7 @@ def run_sync_job(db_path: Path, job_id: int) -> None:
                     title=fields.title, author=fields.author, body_text=fields.body_text,
                     source_relpath=relpath, content_hash=_sha1(fields.body_text),
                     ingested_at=_now(), tags=tuple(getattr(fields, "tags", ())),
+                    media_path=str(path) if save_media_path else None,
                 )
                 db.upsert_story(conn, sig)
             except Exception as exc:  # noqa: BLE001 - one bad file shouldn't abort a 100k-file walk

@@ -102,6 +102,55 @@ def test_sync_job_generic_adapter_with_config_and_glob(tmp_path):
     conn.close()
 
 
+def test_sync_job_save_media_path_records_absolute_path(tmp_path):
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    (archive_root / "my_first_story.txt").write_text("Once upon a time.", encoding="utf-8")
+    db_path = tmp_path / "sync.sqlite"
+    scope = json.dumps({
+        "adapter": "storyindex.adapters.generic_adapter:GenericAdapter",
+        "archive_root": str(archive_root),
+        "glob": "*.txt",
+        "save_media_path": True,
+    })
+    conn = db.connect(db_path)
+    job_id = db.create_job(conn, "sync", "2026-01-01T00:00:00Z", scope=scope)
+    conn.commit()
+    conn.close()
+
+    jobs.run_sync_job(db_path, job_id)
+
+    conn = db.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    story = conn.execute("SELECT media_path FROM stories").fetchone()
+    assert story["media_path"] == str(archive_root / "my_first_story.txt")
+    conn.close()
+
+
+def test_sync_job_without_save_media_path_leaves_it_null(tmp_path):
+    archive_root = tmp_path / "archive"
+    archive_root.mkdir()
+    (archive_root / "my_first_story.txt").write_text("Once upon a time.", encoding="utf-8")
+    db_path = tmp_path / "sync.sqlite"
+    scope = json.dumps({
+        "adapter": "storyindex.adapters.generic_adapter:GenericAdapter",
+        "archive_root": str(archive_root),
+        "glob": "*.txt",
+    })
+    conn = db.connect(db_path)
+    job_id = db.create_job(conn, "sync", "2026-01-01T00:00:00Z", scope=scope)
+    conn.commit()
+    conn.close()
+
+    jobs.run_sync_job(db_path, job_id)
+
+    conn = db.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    story = conn.execute("SELECT media_path FROM stories").fetchone()
+    assert story["media_path"] is None
+    conn.close()
+
+
 def test_sync_job_missing_params_fails_cleanly(tmp_path):
     db_path = tmp_path / "sync.sqlite"
     conn = db.connect(db_path)

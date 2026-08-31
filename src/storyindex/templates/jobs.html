@@ -30,10 +30,10 @@
     so re-running is always safe and never redoes work.
   </li>
   <li>
-    <strong>Review</strong> (<a href="{{ url_for('review_queue') }}">review queue</a>) — model-applied tags are
-    live immediately after clustering, not held back pending approval; the review queue is a worklist of stories
-    that still have unreviewed model tags, so a human can approve (keep) or reject (remove) them at their own
-    pace without blocking the tags from being usable meanwhile.
+    <strong>Results</strong> (<a href="{{ url_for('review_queue') }}">results</a>) — model-applied tags are
+    live immediately after clustering, not held back pending approval; results is a worklist of stories
+    that still have unreviewed model tags, so a human can spot-check them, marking each human-reviewed or
+    removing it, at their own pace without blocking the tags from being usable meanwhile.
   </li>
 </ol>
 </details>
@@ -83,7 +83,8 @@
   </p>
 
   <label>archive root (a folder on this machine): <input type="text" name="archive_root" placeholder="/path/to/my-stories" style="width:24rem"></label><br>
-  <label>file pattern(s): <input type="text" name="glob" value="*.html" style="width:14rem"> <span class="muted">comma-separated, e.g. *.html,*.txt</span></label>
+  <label>file pattern(s): <input type="text" name="glob" value="*.html" style="width:14rem"> <span class="muted">comma-separated, e.g. *.html,*.txt,*.pdf</span></label><br>
+  <label><input type="checkbox" name="save_media_path"> save each file's path so its story page can link back to the original (PDF, comic OCR batch, etc)</label>
 
   <div id="generic-fields">
     <p class="muted">leave a field blank to use its default. See src/storyindex/adapters/generic_adapter.py for the full config schema (scan window, exclude globs, etc).</p>
@@ -130,7 +131,7 @@
   <td><a href="{{ url_for('job_detail', job_id=j['id']) }}">{{ j['id'] }}</a></td>
   <td>{{ j['type'] }}</td>
   <td>{{ j['status'] }}{% if j['reverted_at'] %} (reverted){% endif %}</td>
-  <td>{{ j['done'] }}/{{ j['total'] }}{% if j['failed'] %} ({{ j['failed'] }} failed){% endif %}</td>
+  <td>{{ j['done'] }}/{{ j['total'] }}{% if j['failed'] %} <span style="color:var(--danger)">({{ j['failed'] }} failed)</span>{% endif %}</td>
   <td>{{ j['prompt_name'] or '' }}</td>
   <td>{{ j['model'] or '' }}</td>
   <td class="muted">{{ j['created_at'] }}</td>

@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from flask import Flask, g, redirect, render_template, request, url_for
+from flask import Flask, g, redirect, render_template, request, send_file, url_for
 
 from storyindex import db, libraries, settings
 from storyindex import scheduler as scheduler_module
@@ -365,6 +365,18 @@ def story_detail(story_id: str):
         story=story, parts=parts, tags=tags, site_tags=site_tags,
         prompts=prompts, more_by_author=more_by_author,
     )
+
+
+@app.route("/story/<story_id>/open-original")
+def open_original(story_id: str):
+    conn = get_db()
+    story = db.get_story(conn, story_id)
+    if story is None or not story["media_path"]:
+        return "no original file recorded for this story", 404
+    path = Path(story["media_path"])
+    if not path.is_file():
+        return f"original file not found on disk: {path}", 404
+    return send_file(path)
 
 
 @app.route("/stories/removed")
@@ -860,6 +872,7 @@ def create_sync_job():
     mode = request.form.get("mode", "generic")
     archive_root = request.form.get("archive_root", "").strip()
     glob = request.form.get("glob", "*.html").strip() or "*.html"
+    save_media_path = request.form.get("save_media_path") == "on"
     if not archive_root:
         return redirect(url_for("jobs_list"))
 
@@ -867,7 +880,10 @@ def create_sync_job():
         adapter = request.form.get("adapter", "").strip()
         if not adapter:
             return redirect(url_for("jobs_list"))
-        scope = {"adapter": adapter, "archive_root": archive_root, "glob": glob}
+        scope = {
+            "adapter": adapter, "archive_root": archive_root, "glob": glob,
+            "save_media_path": save_media_path,
+        }
     else:
         config = {}
         title_regex = request.form.get("title_regex", "").strip()
@@ -884,7 +900,10 @@ def create_sync_job():
             config["tags"] = tags
         if request.form.get("strip_html") == "on":
             config["strip_html"] = True
-        scope = {"adapter": GENERIC_ADAPTER_SPEC, "archive_root": archive_root, "glob": glob, "config": config}
+        scope = {
+            "adapter": GENERIC_ADAPTER_SPEC, "archive_root": archive_root, "glob": glob,
+            "config": config, "save_media_path": save_media_path,
+        }
 
     job_id = db.create_job(conn, "sync", _now(), scope=json.dumps(scope))
     conn.commit()

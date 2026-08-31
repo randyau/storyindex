@@ -61,6 +61,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from storyindex.file_text import read_file_text  # noqa: E402
+
 
 def sha1(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
@@ -119,6 +121,11 @@ def main() -> None:
         "--glob", default="*.html",
         help="comma-separated glob(s) of files to walk, relative to --archive-root (default: *.html)",
     )
+    parser.add_argument(
+        "--save-media-path", action="store_true",
+        help="record each file's absolute path in the signature, so a later 'open original' "
+             "link can point back to it (PDF, comic OCR batch, etc)",
+    )
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -152,7 +159,7 @@ def main() -> None:
                 continue
 
             try:
-                html_text = path.read_text(encoding="utf-8", errors="replace")
+                html_text = read_file_text(path)
                 fields = call_extract(adapter, html_text, relpath)
                 group_key = adapter.group_key(relpath)
                 part_idx = adapter.part_index(relpath)
@@ -172,6 +179,7 @@ def main() -> None:
                 "content_hash": sha1(fields.body_text),
                 "ingested_at": datetime.datetime.utcnow().isoformat() + "Z",
                 "tags": list(getattr(fields, "tags", ())),
+                "media_path": str(path) if args.save_media_path else None,
             }
             (args.out / f"{sig['id']}.json").write_text(
                 json.dumps(sig, ensure_ascii=False), encoding="utf-8"

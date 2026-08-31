@@ -25,6 +25,7 @@ def test_additive_columns_present(conn):
     assert "removed_at" in _cols(conn, "stories")
     assert "last_block_seconds" in _cols(conn, "jobs")
     assert "last_block_items" in _cols(conn, "jobs")
+    assert "media_path" in _cols(conn, "stories")
 
 
 def test_record_block_timing_updates_job_row(conn):
@@ -79,3 +80,45 @@ def test_stories_default_status_active(conn, make_sig):
     db.upsert_story(conn, make_sig("s1"))
     row = conn.execute("SELECT status FROM stories WHERE id='s1'").fetchone()
     assert row[0] == "active"
+
+
+def test_upsert_story_stores_media_path(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1", media_path="/archive/paper.pdf"))
+    row = conn.execute("SELECT media_path FROM stories WHERE id='s1'").fetchone()
+    assert row[0] == "/archive/paper.pdf"
+
+
+def test_upsert_story_defaults_media_path_to_null(conn, make_sig):
+    db.upsert_story(conn, make_sig("s1"))
+    row = conn.execute("SELECT media_path FROM stories WHERE id='s1'").fetchone()
+    assert row[0] is None
+
+
+def test_reconnect_backfills_media_path_on_pre_existing_db(tmp_path):
+    """A DB created before media_path existed must still gain the column
+    on the next connect() - simulated here by deleting the column from an
+    already-"initialized" DB and reconnecting."""
+    path = tmp_path / "old.sqlite"
+    db.connect(path).close()
+
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE stories RENAME TO stories_old")
+    conn.execute(
+        """
+        CREATE TABLE stories (
+            id TEXT PRIMARY KEY, group_id TEXT NOT NULL, part_index INTEGER NOT NULL,
+            title TEXT NOT NULL, author TEXT NOT NULL, body_text TEXT NOT NULL,
+            source_relpath TEXT NOT NULL, content_hash TEXT NOT NULL, ingested_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active', removed_at TEXT
+        )
+        """
+    )
+    conn.execute("DROP TABLE stories_old")
+    conn.commit()
+    conn.close()
+
+    reconnected = db.connect(path)
+    assert "media_path" in _cols(reconnected, "stories")
+    reconnected.close()

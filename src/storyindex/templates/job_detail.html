@@ -6,7 +6,7 @@
 <p>
   status: <strong id="job-status">{{ job['status'] }}</strong> ·
   progress: <span id="job-progress">{{ job['done'] }}/{{ job['total'] }}</span>
-  <span id="job-failed">{% if job['failed'] %}({{ job['failed'] }} failed){% endif %}</span>
+  <span id="job-failed" style="color:var(--danger)">{% if job['failed'] %}({{ job['failed'] }} failed){% endif %}</span>
   <span id="job-eta-line">{% if eta %} · time left: <span class="muted">{{ eta }}</span>{% endif %}</span>
 </p>
 {% if job['type'] == 'extract' and job['status'] == 'running' %}
@@ -23,7 +23,7 @@ scheduler to itself the whole time. See the <a href="{{ url_for('scheduler_statu
 {% if job['reverted_at'] %}<p style="color:#a00">reverted at {{ job['reverted_at'] }} — its tags/candidates were removed.</p>{% endif %}
 
 {% if errors %}
-<h3>{{ job['failed'] }} item{{ 's' if job['failed'] != 1 }} failed</h3>
+<h3 style="color:var(--danger)">{{ job['failed'] }} item{{ 's' if job['failed'] != 1 }} failed</h3>
 <table>
 <tr><th>item</th><th>error</th></tr>
 {% for e in errors %}
@@ -38,7 +38,7 @@ yet — <a href="{{ url_for('jobs_list') }}">start a clustering pass</a> to fold
 {% endif %}
 
 {% if job['status'] == 'done' and job['type'] == 'cluster' and not job['reverted_at'] %}
-<p><a href="{{ url_for('review_queue', job_id=job['id']) }}">review the tags this run applied →</a></p>
+<p><a href="{{ url_for('review_queue', job_id=job['id']) }}">see the tags this run applied →</a></p>
 {% endif %}
 
 {% if job['status'] == 'done' and not job['reverted_at'] %}

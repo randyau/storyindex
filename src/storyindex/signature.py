@@ -40,6 +40,12 @@ class StorySignature:
     # Optional and separate from the local-LLM tagging pipeline: these land
     # in their own site_tags/story_site_tags tables, never in tags/story_tags.
     tags: tuple[str, ...] = ()
+    # Absolute path to the original file this story's text was pulled from
+    # (a local PDF, comic OCR batch, etc), if the caller opted in to
+    # recording it. None for web-crawled stories, where source_relpath is
+    # deliberately root-relative only (see docs/crawler-parser-contract.md)
+    # and no absolute filesystem path is ever stored.
+    media_path: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> StorySignature:
@@ -48,6 +54,7 @@ class StorySignature:
             raise ValueError(f"signature missing required fields: {missing}")
         fields = {f: data[f] for f in REQUIRED_FIELDS}
         fields["tags"] = tuple(data.get("tags", ()))
+        fields["media_path"] = data.get("media_path")
         return cls(**fields)
 
 

@@ -65,12 +65,17 @@ def main() -> None:
         "--adapter-config", type=Path, default=None,
         help="optional JSON config, for adapters that take one (e.g. GenericAdapter)",
     )
+    parser.add_argument(
+        "--save-media-path", action="store_true",
+        help="record each file's absolute path, so a later 'open original' link can point back to it",
+    )
     args = parser.parse_args()
 
     scope = {
         "adapter": args.adapter,
         "archive_root": str(args.archive_root),
         "glob": args.glob,
+        "save_media_path": args.save_media_path,
     }
     if args.adapter_config is not None:
         scope["config"] = json.loads(args.adapter_config.read_text(encoding="utf-8"))

@@ -1,6 +1,67 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m with context %}
 {% block title %}{{ story['title'] }} — storyindex{% endblock %}
+{% block body_class %}story-page{% endblock %}
+{% block extra_style %}
+  body.story-page { max-width: 1150px; }
+  .story-layout { display: grid; grid-template-columns: 1fr; gap: 1.5rem; align-items: start; margin-top: 1rem; }
+  .story-main { min-width: 0; }
+  .story-main .story-body {
+    font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+    font-size: 1.2rem;
+    line-height: 1.75;
+  }
+  .tag-panel { min-width: 0; }
+  .tag-drawer summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.5rem 0.75rem;
+    list-style: none;
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-alt);
+  }
+  .tag-drawer summary::-webkit-details-marker { display: none; }
+  .tag-drawer[open] summary { border-radius: 8px 8px 0 0; border-bottom: none; }
+  .tag-drawer summary::before { content: "▸ "; }
+  .tag-drawer[open] summary::before { content: "▾ "; }
+  .tag-drawer-body {
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 1rem;
+    background: var(--bg-alt);
+  }
+  .chapter-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-size: 0.95rem; }
+  .chapter-nav a {
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .chapter-nav a:hover { border-color: var(--accent); text-decoration: none; }
+  .chapter-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .chapter-list a, .chapter-list strong {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    min-width: 1.6rem;
+    text-align: center;
+  }
+  .chapter-list a:hover { border-color: var(--accent); text-decoration: none; }
+  .chapter-list strong { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  @media (min-width: 1000px) {
+    .story-layout {
+      grid-template-columns: minmax(0, 68ch) 280px;
+      justify-content: center;
+      gap: 3rem;
+    }
+    .story-main { grid-column: 1; grid-row: 1; }
+    .tag-panel { grid-column: 2; grid-row: 1; position: sticky; top: 1.5rem; align-self: start; max-height: calc(100vh - 3rem); overflow-y: auto; }
+  }
+{% endblock %}
 {% block content %}
 <h2>{{ story['title'] }}</h2>
 <p class="muted">
@@ -13,61 +74,81 @@
   {% endif %}
 </p>
 
-{{ m.chapter_nav(story, parts) }}
+<div class="story-layout">
+  <aside class="tag-panel">
+    <details class="tag-drawer" id="tag-drawer" open>
+      <summary>tags &amp; tools</summary>
+      <div class="tag-drawer-body">
+        <h3>tags</h3>
+        <p>
+        {% for st in site_tags %}
+          {{ m.tag_pill(st['label'], href=url_for('site_tag_detail', code=st['code'])) }}
+        {% endfor %}
+        {% for t in tags %}
+          {{ m.tag_pill(t['name'], href=url_for('tag_detail', tag_id=t['id']),
+                        approve_action=url_for('approve_tag', story_id=story['id'], tag_id=t['id']) if t['source'] == 'model' else None,
+                        delete_action=url_for('delete_tag', story_id=story['id'], tag_id=t['id'])) }}
+        {% else %}
+          {% if not site_tags %}<span class="muted">no tags yet.</span>{% endif %}
+        {% endfor %}
+        </p>
+        <form method="post" action="{{ url_for('add_tag', story_id=story['id']) }}">
+          <input type="text" id="add-tag-input" name="name" placeholder="add tag... (type to search existing)" list="tag-names" autocomplete="off">
+          <input type="submit" value="add">
+        </form>
+        <datalist id="tag-names"></datalist>
+        <script>attachTagAutocomplete("add-tag-input", "tag-names");</script>
 
-{% if story['media_path'] %}
-<p><a href="{{ url_for('open_original', story_id=story['id']) }}">open original file</a></p>
-{% endif %}
+        {% set pending = tags|selectattr('source', 'equalto', 'model')|list %}
+        {% if pending %}
+        <p class="muted">
+          {{ pending|length }} tag{{ 's' if pending|length != 1 }} awaiting review —
+          {{ m.action_form(url_for('approve_all_tags', story_id=story['id']), 'approve all') }}
+          {{ m.action_form(url_for('reject_all_tags', story_id=story['id']), 'reject all',
+                            confirm='Reject every pending tag on this story?') }}
+        </p>
+        {% endif %}
 
-<h3>tags</h3>
-<p>
-{% for st in site_tags %}
-  {{ m.tag_pill(st['label'], href=url_for('site_tag_detail', code=st['code'])) }}
-{% endfor %}
-{% for t in tags %}
-  {{ m.tag_pill(t['name'], href=url_for('tag_detail', tag_id=t['id']),
-                approve_action=url_for('approve_tag', story_id=story['id'], tag_id=t['id']) if t['source'] == 'model' else None,
-                delete_action=url_for('delete_tag', story_id=story['id'], tag_id=t['id'])) }}
-{% else %}
-  {% if not site_tags %}<span class="muted">no tags yet.</span>{% endif %}
-{% endfor %}
-</p>
-<form method="post" action="{{ url_for('add_tag', story_id=story['id']) }}">
-  <input type="text" id="add-tag-input" name="name" placeholder="add tag... (type to search existing)" list="tag-names" autocomplete="off">
-  <input type="submit" value="add">
-</form>
-<datalist id="tag-names"></datalist>
-<script>attachTagAutocomplete("add-tag-input", "tag-names");</script>
+        {% if prompts %}
+        <p class="muted">
+          <form method="post" action="{{ url_for('preview_prompt_on_story', story_id=story['id']) }}">
+            try a prompt on this story:<br>
+            <select name="prompt_id">
+              {% for p in prompts %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
+            </select>
+            <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:12rem">
+            <input type="submit" value="preview">
+          </form>
+        </p>
+        {% endif %}
+      </div>
+    </details>
+  </aside>
 
-{% set pending = tags|selectattr('source', 'equalto', 'model')|list %}
-{% if pending %}
-<p class="muted">
-  {{ pending|length }} tag{{ 's' if pending|length != 1 }} awaiting review —
-  {{ m.action_form(url_for('approve_all_tags', story_id=story['id']), 'approve all') }}
-  {{ m.action_form(url_for('reject_all_tags', story_id=story['id']), 'reject all',
-                    confirm='Reject every pending tag on this story?') }}
-</p>
-{% endif %}
+  <div class="story-main">
+    {{ m.chapter_nav(story, parts) }}
 
-{% if prompts %}
-<p class="muted">
-  <form method="post" action="{{ url_for('preview_prompt_on_story', story_id=story['id']) }}" style="display:inline">
-    try a prompt on this story:
-    <select name="prompt_id">
-      {% for p in prompts %}<option value="{{ p['id'] }}">{{ p['name'] }}</option>{% endfor %}
-    </select>
-    <input type="text" name="model" value="{{ settings.default_extract_model }}" style="width:12rem">
-    <input type="submit" value="preview">
-  </form>
-</p>
-{% endif %}
+    {% if story['media_path'] %}
+    <p><a href="{{ url_for('open_original', story_id=story['id']) }}">open original file</a></p>
+    {% endif %}
 
-<div class="story-body">{{ story['body_text'] }}</div>
+    <div class="story-body">{{ story['body_text'] }}</div>
 
-{{ m.chapter_nav(story, parts) }}
+    {{ m.chapter_nav(story, parts) }}
 
-{% if more_by_author %}
-<h3>more by {{ story['author'] }}</h3>
-{{ m.story_list(more_by_author, show_author=False) }}
-{% endif %}
+    {% if more_by_author %}
+    <h3>more by {{ story['author'] }}</h3>
+    {{ m.story_list(more_by_author, show_author=False) }}
+    {% endif %}
+  </div>
+</div>
+<script>
+(function () {
+  var drawer = document.getElementById("tag-drawer");
+  if (!drawer) return;
+  window.addEventListener("scroll", function () {
+    if (window.scrollY < 40 && !drawer.open) drawer.open = true;
+  }, { passive: true });
+})();
+</script>
 {% endblock %}

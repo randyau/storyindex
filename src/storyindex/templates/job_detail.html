@@ -9,8 +9,8 @@
   <span id="job-failed" style="color:var(--danger)">{% if job['failed'] %}({{ job['failed'] }} failed){% endif %}</span>
   <span id="job-eta-line">{% if eta %} · time left: <span class="muted">{{ eta }}</span>{% endif %}</span>
 </p>
-{% if job['type'] == 'extract' and job['status'] == 'running' %}
-<p class="muted">"time left" is a rough estimate accounting for every other extraction job currently
+{% if job['type'] in ('extract', 'cluster') and job['status'] == 'running' %}
+<p class="muted">"time left" is a rough estimate accounting for every other extraction/clustering job currently
 sharing the scheduler, staggered by expected finish order — not this job's own pace as if it had the
 scheduler to itself the whole time. See the <a href="{{ url_for('scheduler_status') }}">scheduler page</a> for the full rotation and how the other jobs' estimates compare.</p>
 {% endif %}

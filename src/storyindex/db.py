@@ -681,23 +681,37 @@ def get_job(conn: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
     return row
 
 
-def list_active_extract_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Extract jobs the scheduler is currently rotating through (queued or
-    running), ordered the same way scheduler.py visits them each round -
-    grouped by model, then creation order within a model (see
-    scheduler.run_scheduler's `sorted(..., key=...)`). Used by the
-    /scheduler status view; the scheduler itself keeps its own separate
-    per-round query rather than depending on this."""
+def list_active_scheduled_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """extract and cluster jobs the scheduler is currently rotating through
+    (queued or running), ordered the same way scheduler.py visits them each
+    round - grouped by model, then creation order within a model (see
+    scheduler.run_scheduler's `sorted(..., key=...)`). Both job types hit
+    Ollama, and switching models mid-rotation costs a VRAM reload regardless
+    of which job type is on either side of the switch, so they share one
+    rotation rather than cluster jobs running invisibly alongside it. Used
+    by the /scheduler status view; the scheduler itself keeps its own
+    separate per-round query rather than depending on this."""
     with _row_mode(conn):
         rows = conn.execute(
             """
             SELECT j.*, p.name AS prompt_name FROM jobs j
             LEFT JOIN prompts p ON p.id = j.prompt_id
-            WHERE j.type = 'extract' AND j.status IN ('queued', 'running')
+            WHERE j.type IN ('extract', 'cluster') AND j.status IN ('queued', 'running')
             ORDER BY j.model, j.created_at
             """
         ).fetchall()
     return rows
+
+
+def reset_job_progress(conn: sqlite3.Connection, job_id: int) -> None:
+    """Zero a job's done/failed counters. Used when the scheduler (re)builds
+    a cluster job's in-memory state from scratch - unlike extract jobs
+    (resume-safe via _scope_stories' exclude_job_id, since each story's
+    tag_candidates row is written the moment it's processed), a cluster
+    job's progress lives only in the scheduler process's memory until the
+    final write-out, so a scheduler restart mid-job must restart counting
+    from zero rather than adding on top of whatever it reached before."""
+    conn.execute("UPDATE jobs SET done = 0, failed = 0 WHERE id = ?", (job_id,))
 
 
 def revert_job(conn: sqlite3.Connection, job_id: int, reverted_at: str) -> None:
@@ -748,19 +762,21 @@ def reap_dead_pid_jobs(conn: sqlite3.Connection, now: str) -> list[int]:
     crashed). Safe to call often (e.g. on every /jobs view) - only touches
     jobs whose recorded pid is no longer alive.
 
-    Excludes 'extract' jobs: unlike cluster/sync (each its own independent
+    Excludes 'extract' and 'cluster' jobs: unlike sync (its own independent
     _spawn_job subprocess, so a dead pid really does mean that job died),
-    every running extract job's `pid` column holds the *shared* scheduler
-    process's pid (see scheduler.py). If that process dies (crash, or an
-    intentional restart to pick up new code), every extract job sharing it
-    would otherwise get mass-failed on the very next page load - even
-    though app._ensure_scheduler_if_extract_jobs_pending already respawns
-    the scheduler for exactly this case, and the scheduler resumes a still-
-    'running' job cleanly (see jobs._scope_stories' exclude_job_id)."""
+    every running extract/cluster job's `pid` column holds the *shared*
+    scheduler process's pid (see scheduler.py). If that process dies (crash,
+    or an intentional restart to pick up new code), every extract/cluster
+    job sharing it would otherwise get mass-failed on the very next page
+    load - even though app._ensure_scheduler_if_jobs_pending already
+    respawns the scheduler for exactly this case, and the scheduler resumes
+    a still-'running' job cleanly (see jobs._scope_stories' exclude_job_id
+    for extract, db.reset_job_progress for cluster)."""
 
     with _row_mode(conn):
         running = conn.execute(
-            "SELECT id, pid FROM jobs WHERE status = 'running' AND pid IS NOT NULL AND type != 'extract'"
+            "SELECT id, pid FROM jobs WHERE status = 'running' AND pid IS NOT NULL "
+            "AND type NOT IN ('extract', 'cluster')"
         ).fetchall()
     reaped = []
     for row in running:

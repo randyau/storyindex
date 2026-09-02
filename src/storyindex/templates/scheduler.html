@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}scheduler — storyindex{% endblock %}
 {% block content %}
-<h2>extraction scheduler</h2>
-<p class="muted">one background process round-robins every queued/running extraction job in blocks of
-{{ block_size }} stories at a time, grouped by model, so each job's fixed instruction prefix stays warm
-in the local model's cache instead of losing it on every call. It exits on its own once nothing is
-queued, and respawns automatically the next time an extraction job is created or this page (or a job's
-status) is checked.</p>
+<h2>scheduler</h2>
+<p class="muted">one background process round-robins every queued/running extraction <em>and</em> clustering
+job in blocks of {{ block_size }} items (stories for extraction, distinct tag texts for clustering) at a
+time, grouped by model, so each job's fixed instruction prefix stays warm in the local model's cache
+instead of losing it on every call — and so extraction and clustering jobs don't thrash Ollama's VRAM by
+swapping models back and forth on every call between them. It exits on its own once nothing is queued,
+and respawns automatically the next time an extraction/clustering job is created or this page (or a
+job's status) is checked.</p>
 
 <p id="scheduler-state">
   {% if alive %}
@@ -21,11 +23,12 @@ status) is checked.</p>
 scheduler moves to the next model, since switching models means a full reload rather than just a
 prefix-cache miss.</p>
 <table id="rotation-table">
-<tr><th>#</th><th>job</th><th>status</th><th>model</th><th>prompt</th><th>progress</th><th>time left</th></tr>
+<tr><th>#</th><th>job</th><th>type</th><th>status</th><th>model</th><th>prompt</th><th>progress</th><th>time left</th></tr>
 {% for j in active_jobs %}
 <tr>
   <td class="muted">{{ loop.index }}</td>
   <td><a href="{{ url_for('job_detail', job_id=j['id']) }}">#{{ j['id'] }}</a></td>
+  <td>{{ j['type'] }}</td>
   <td>{{ j['status'] }}</td>
   <td>{{ j['model'] }}</td>
   <td>{{ j['prompt_name'] or '' }}</td>
@@ -33,7 +36,7 @@ prefix-cache miss.</p>
   <td class="muted">{{ etas[j['id']] or '…' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="7" class="muted">nothing queued right now.</td></tr>
+<tr><td colspan="8" class="muted">nothing queued right now.</td></tr>
 {% endfor %}
 </table>
 <p class="muted">"time left" is a rough estimate from each job's own most recent block, accounting for the

@@ -314,3 +314,110 @@ def test_scheduler_marks_job_failed_when_prompt_missing(tmp_path, make_sig, monk
     assert job["status"] == "failed"
     assert job["error"]
     conn.close()
+
+
+def _fake_embed(text, model=None, host=None):
+    # A tiny deterministic embedding: same text -> same vector, and
+    # "alpha"/"alpha2" land close together while "beta" is far, so the
+    # greedy threshold-based clustering in cluster.assign_embedded has
+    # something meaningful to group.
+    base = 1.0 if text.startswith("alpha") else 0.0
+    return [base, 1.0 - base]
+
+
+def test_scheduler_runs_a_cluster_job_to_completion(tmp_path, make_sig, monkeypatch):
+    dbpath = tmp_path / "s.sqlite"
+    conn = db.connect(dbpath)
+    for i in range(2):
+        db.upsert_story(conn, make_sig(f"s{i}"))
+    now = _now()
+    db.insert_candidates(conn, "s0", ["alpha"], "p", "m", now)
+    db.insert_candidates(conn, "s1", ["alpha"], "p", "m", now)
+    job_id = db.create_job(conn, "cluster", now, model="fake-embed", scope=None)
+    conn.commit()
+    conn.close()
+
+    _fast(monkeypatch)
+    monkeypatch.setattr(scheduler, "embed", _fake_embed)
+
+    scheduler.run_scheduler(dbpath)
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, job_id)
+    assert job["status"] == "done"
+    assert job["done"] == job["total"] == 1  # one distinct text: "alpha"
+    tags = conn.execute("SELECT name FROM tags").fetchall()
+    assert [t[0] for t in tags] == ["alpha"]
+    links = conn.execute("SELECT story_id FROM story_tags").fetchall()
+    assert sorted(link[0] for link in links) == ["s0", "s1"]
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM tag_candidates WHERE status='candidate'"
+    ).fetchone()[0]
+    assert remaining == 0
+    conn.close()
+
+
+def test_scheduler_groups_extract_and_cluster_jobs_by_model(tmp_path, make_sig, monkeypatch):
+    # A cluster job's embedding model swapped in mid-round against an
+    # extract job's generation model costs a full VRAM reload just like
+    # alternating between two different generation models would - grouping
+    # by model must treat both job types uniformly.
+    dbpath = tmp_path / "s.sqlite"
+    conn = db.connect(dbpath)
+    for i in range(2):
+        db.upsert_story(conn, make_sig(f"s{i}"))
+    now = _now()
+    db.insert_candidates(conn, "s0", ["alpha"], "p", "m", now)
+    p1 = db.create_prompt(conn, "p1", "text1", now)
+    db.create_job(conn, "extract", now, prompt_id=p1, model="modelX", scope="all")
+    db.create_job(conn, "cluster", now, model="modelY", scope=None)
+    db.create_job(conn, "extract", now, prompt_id=p1, model="modelX", scope="all")
+    conn.commit()
+    conn.close()
+
+    _fast(monkeypatch, block_size=1)
+    models_used = []
+    monkeypatch.setattr(
+        jobs_module, "extract_tags",
+        lambda sig, model, prompt_text, host=None, max_ctx_tokens=None: (models_used.append(model), ["x"])[1],
+    )
+    monkeypatch.setattr(scheduler, "embed", lambda text, model=None, host=None: (models_used.append(model), [1.0, 0.0])[1])
+
+    scheduler.run_scheduler(dbpath)
+
+    # First full round should visit both modelX jobs before modelY.
+    assert models_used[:3] == ["modelX", "modelX", "modelY"]
+
+
+def test_scheduler_resets_progress_when_resuming_a_cluster_job(tmp_path, make_sig, monkeypatch):
+    # A cluster job's in-progress clusters live only in the scheduler
+    # process's memory, unlike extract's per-story tag_candidates rows -
+    # if a prior scheduler process died mid-job, a fresh one rebuilding
+    # its state from scratch must reset done/failed rather than adding on
+    # top of whatever the dead process reached (db.reset_job_progress).
+    dbpath = tmp_path / "s.sqlite"
+    conn = db.connect(dbpath)
+    for i in range(2):
+        db.upsert_story(conn, make_sig(f"s{i}"))
+    now = _now()
+    db.insert_candidates(conn, "s0", ["alpha"], "p", "m", now)
+    db.insert_candidates(conn, "s1", ["beta"], "p", "m", now)
+    job_id = db.create_job(conn, "cluster", now, model="fake-embed", scope=None)
+    db.mark_job_running(conn, job_id, now, pid=999999)  # stale pid: old process
+    db.set_job_total(conn, job_id, 1)
+    db.increment_job_progress(conn, job_id, done=1)  # stale progress from the dead run
+    conn.commit()
+    conn.close()
+
+    _fast(monkeypatch)
+    monkeypatch.setattr(scheduler, "embed", _fake_embed)
+
+    scheduler.run_scheduler(dbpath)
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, job_id)
+    assert job["status"] == "done"
+    # Rebuilt from the 2 still-pending candidates, not 1 (stale) + 2 (redone).
+    assert job["total"] == 2
+    assert job["done"] == 2
+    conn.close()

@@ -18,6 +18,7 @@ from flask import Flask, g, redirect, render_template, request, send_file, url_f
 
 from storyindex import db, libraries, settings
 from storyindex import scheduler as scheduler_module
+from storyindex.cluster import DEFAULT_EMBED_MODEL
 
 app = Flask(__name__)
 app.config["DB_PATH"] = Path("storyindex.sqlite")
@@ -45,7 +46,8 @@ def _spawn_job(job_id: int) -> None:
     created the job returns immediately — the app stays usable (browse,
     read, review other stories) while the job runs in the background.
 
-    Not used for `extract` jobs — see _ensure_scheduler_running below."""
+    Not used for `extract`/`cluster` jobs — see _ensure_scheduler_running
+    below."""
     env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
     subprocess.Popen(
         [sys.executable, "-m", "storyindex.jobs", "--job-id", str(job_id), "--db", str(app.config["DB_PATH"])],
@@ -61,10 +63,12 @@ def _scheduler_pidfile() -> Path:
 
 
 def _ensure_scheduler_running() -> None:
-    """Make sure the singleton extract-job scheduler (scheduler.py) is
-    alive, spawning it if not. One process handles every queued/running
-    extract job for this DB - see scheduler.py's module docstring for why
-    that matters (prefix-cache locality across a job's own calls)."""
+    """Make sure the singleton extract/cluster-job scheduler (scheduler.py)
+    is alive, spawning it if not. One process handles every queued/running
+    extract and cluster job for this DB - see scheduler.py's module
+    docstring for why that matters (prefix-cache locality across a job's
+    own calls, and avoiding VRAM swap thrashing between the two job
+    types)."""
     pidfile = _scheduler_pidfile()
     if pidfile.exists():
         try:
@@ -84,16 +88,20 @@ def _ensure_scheduler_running() -> None:
     pidfile.write_text(str(proc.pid))
 
 
-def _ensure_scheduler_if_extract_jobs_pending(conn: sqlite3.Connection) -> None:
+def _ensure_scheduler_if_jobs_pending(conn: sqlite3.Connection) -> None:
     """Self-healing hook: if the scheduler process dies mid-session (OOM,
     an uncaught exception, `kill -9`) while the app itself keeps running,
     nothing else respawns it - reap_dead_pid_jobs only fails jobs that were
     already 'running' with a dead pid, but a job still 'queued' (never
     picked up yet) has no pid to notice is dead, so it would sit queued
     forever with no scheduler left to serve it. Call this from any
-    jobs-related view so a page load is enough to notice and respawn."""
-    if db.count_jobs(conn, status="queued", type="extract") or db.count_jobs(conn, status="running", type="extract"):
-        _ensure_scheduler_running()
+    jobs-related view so a page load is enough to notice and respawn.
+    Covers both extract and cluster jobs - both run under the same shared
+    scheduler process."""
+    for job_type in ("extract", "cluster"):
+        if db.count_jobs(conn, status="queued", type=job_type) or db.count_jobs(conn, status="running", type=job_type):
+            _ensure_scheduler_running()
+            return
 
 
 def get_db() -> sqlite3.Connection:
@@ -129,11 +137,11 @@ def _format_duration(seconds: float) -> str:
     return "<1m"
 
 
-def _extract_job_etas(active_jobs: list[sqlite3.Row]) -> dict[int, float | None]:
-    """Rough completion-time estimate for every active extract job at
-    once - has to see the whole rotation together, not one job at a time,
-    because the jobs aren't independent: they're all splitting the same
-    scheduler.
+def _scheduled_job_etas(active_jobs: list[sqlite3.Row]) -> dict[int, float | None]:
+    """Rough completion-time estimate for every active extract/cluster job
+    at once - has to see the whole rotation together, not one job at a
+    time, because the jobs aren't independent: they're all splitting the
+    same scheduler.
 
     own_time[j] = remaining_j / rate_j is how long job j would take if it
     had the scheduler to itself, from its own most recent block's
@@ -588,11 +596,12 @@ def cancel_job(job_id: int):
     job = db.get_job(conn, job_id)
     pid = db.cancel_job(conn, job_id, _now())
     conn.commit()
-    # extract jobs share one scheduler process's pid across many jobs
-    # (see _ensure_scheduler_running) - marking the row failed is enough
-    # for the scheduler to drop it on its next pass, and SIGTERM-ing that
-    # pid would kill every other extract job it's currently working too.
-    if pid is not None and job is not None and job["type"] != "extract":
+    # extract/cluster jobs share one scheduler process's pid across many
+    # jobs (see _ensure_scheduler_running) - marking the row failed is
+    # enough for the scheduler to drop it on its next pass, and
+    # SIGTERM-ing that pid would kill every other extract/cluster job it's
+    # currently working too.
+    if pid is not None and job is not None and job["type"] not in ("extract", "cluster"):
         import signal
         try:
             os.kill(pid, signal.SIGTERM)
@@ -766,7 +775,7 @@ def jobs_list():
     conn = get_db()
     if db.reap_dead_pid_jobs(conn, _now()):
         conn.commit()
-    _ensure_scheduler_if_extract_jobs_pending(conn)
+    _ensure_scheduler_if_jobs_pending(conn)
     prompts = db.list_prompts(conn)
     if not prompts:
         _seed_default_prompt(conn)
@@ -794,10 +803,10 @@ def _seed_default_prompt(conn: sqlite3.Connection) -> None:
 
 
 def _job_eta_display(conn: sqlite3.Connection, job: sqlite3.Row) -> str | None:
-    if job["type"] != "extract" or job["status"] != "running":
+    if job["type"] not in ("extract", "cluster") or job["status"] != "running":
         return None
-    active_jobs = db.list_active_extract_jobs(conn)
-    eta = _extract_job_etas(active_jobs).get(job["id"])
+    active_jobs = db.list_active_scheduled_jobs(conn)
+    eta = _scheduled_job_etas(active_jobs).get(job["id"])
     return _format_duration(eta) if eta is not None else None
 
 
@@ -817,7 +826,7 @@ def job_status_json(job_id: int):
     conn = get_db()
     if db.reap_dead_pid_jobs(conn, _now()):
         conn.commit()
-    _ensure_scheduler_if_extract_jobs_pending(conn)
+    _ensure_scheduler_if_jobs_pending(conn)
     job = db.get_job(conn, job_id)
     if job is None:
         return {"error": "not found"}, 404
@@ -831,9 +840,9 @@ def job_status_json(job_id: int):
 
 def _scheduler_status() -> dict:
     """Shared by /scheduler and /scheduler/status.json - pid liveness plus
-    the active extract jobs in the same model-grouped order scheduler.py
-    itself visits them in, so the view reflects the real rotation rather
-    than just job-creation order."""
+    the active extract/cluster jobs in the same model-grouped order
+    scheduler.py itself visits them in, so the view reflects the real
+    rotation rather than just job-creation order."""
     pidfile = _scheduler_pidfile()
     pid = None
     if pidfile.exists():
@@ -843,10 +852,10 @@ def _scheduler_status() -> dict:
             pid = None
     alive = pid is not None and db._pid_alive(pid)
     conn = get_db()
-    active_jobs = db.list_active_extract_jobs(conn)
+    active_jobs = db.list_active_scheduled_jobs(conn)
     etas = {
         jid: _format_duration(eta) if eta is not None else None
-        for jid, eta in _extract_job_etas(active_jobs).items()
+        for jid, eta in _scheduled_job_etas(active_jobs).items()
     }
     return {"alive": alive, "pid": pid, "active_jobs": active_jobs, "etas": etas}
 
@@ -856,7 +865,7 @@ def scheduler_status():
     conn = get_db()
     if db.reap_dead_pid_jobs(conn, _now()):
         conn.commit()
-    _ensure_scheduler_if_extract_jobs_pending(conn)
+    _ensure_scheduler_if_jobs_pending(conn)
     status = _scheduler_status()
     return render_template("scheduler.html", block_size=scheduler_module.BLOCK_SIZE, **status)
 
@@ -866,14 +875,14 @@ def scheduler_status_json():
     conn = get_db()
     if db.reap_dead_pid_jobs(conn, _now()):
         conn.commit()
-    _ensure_scheduler_if_extract_jobs_pending(conn)
+    _ensure_scheduler_if_jobs_pending(conn)
     status = _scheduler_status()
     return {
         "alive": status["alive"],
         "pid": status["pid"],
         "jobs": [
             {
-                "id": j["id"], "status": j["status"], "model": j["model"],
+                "id": j["id"], "type": j["type"], "status": j["status"], "model": j["model"],
                 "prompt_name": j["prompt_name"], "done": j["done"],
                 "total": j["total"], "failed": j["failed"], "eta": status["etas"][j["id"]],
             }
@@ -901,10 +910,14 @@ def create_extract_job():
 @app.route("/jobs/cluster", methods=["POST"])
 def create_cluster_job():
     conn = get_db()
-    model = request.form.get("model", "").strip() or None
+    # Always store a concrete model (not None) so the scheduler's
+    # group-by-model rotation (see scheduler.py) sorts this job
+    # consistently alongside other cluster/extract jobs rather than under
+    # an unstable "" key.
+    model = request.form.get("model", "").strip() or DEFAULT_EMBED_MODEL
     job_id = db.create_job(conn, "cluster", _now(), model=model)
     conn.commit()
-    _spawn_job(job_id)
+    _ensure_scheduler_running()
     return redirect(url_for("job_detail", job_id=job_id))
 
 
@@ -1100,7 +1113,7 @@ def main() -> None:
     conn.commit()
     if reaped:
         print(f"recovered from an unclean shutdown: marked {len(reaped)} stuck job(s) failed: {reaped}")
-    _ensure_scheduler_if_extract_jobs_pending(conn)
+    _ensure_scheduler_if_jobs_pending(conn)
     conn.close()
 
     app.run(host=args.host, port=args.port, debug=False)

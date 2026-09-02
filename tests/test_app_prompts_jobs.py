@@ -211,11 +211,12 @@ def test_create_extract_job_runs_to_completion(tmp_path, make_sig, monkeypatch):
 
 
 def test_cancel_job_route_marks_failed_and_signals_process(tmp_path, monkeypatch):
-    # cluster/sync jobs still run as their own dedicated subprocess, so
-    # cancelling one should SIGTERM its recorded pid.
+    # sync jobs still run as their own dedicated subprocess (unlike
+    # extract/cluster, which now share the scheduler's pid), so cancelling
+    # one should SIGTERM its recorded pid.
     dbpath = tmp_path / "t.sqlite"
     conn = db.connect(dbpath)
-    job_id = db.create_job(conn, "cluster", "2026-01-01T00:00:00Z")
+    job_id = db.create_job(conn, "sync", "2026-01-01T00:00:00Z")
     db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=999999)
     conn.commit()
     conn.close()
@@ -259,6 +260,70 @@ def test_cancel_extract_job_does_not_kill_shared_scheduler_pid(tmp_path, monkeyp
     job = db.get_job(conn, job_id)
     assert job["status"] == "failed"
     assert job["error"] == "cancelled by user"
+    conn.close()
+
+
+def test_cancel_cluster_job_does_not_kill_shared_scheduler_pid(tmp_path, monkeypatch):
+    # Same reasoning as the extract case above: cluster jobs now also
+    # share the scheduler's pid.
+    dbpath = tmp_path / "t.sqlite"
+    conn = db.connect(dbpath)
+    job_id = db.create_job(conn, "cluster", "2026-01-01T00:00:00Z")
+    db.mark_job_running(conn, job_id, "2026-01-01T00:00:00Z", pid=999999)
+    conn.commit()
+    conn.close()
+
+    killed = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: killed.append((pid, sig)))
+
+    client = _client(dbpath)
+    r = client.post(f"/jobs/{job_id}/cancel")
+    assert r.status_code == 302
+    assert killed == []
+
+    conn = db.connect(dbpath)
+    job = db.get_job(conn, job_id)
+    assert job["status"] == "failed"
+    assert job["error"] == "cancelled by user"
+    conn.close()
+
+
+def test_create_cluster_job_goes_through_shared_scheduler(tmp_path, monkeypatch):
+    # cluster jobs used to _spawn_job a dedicated subprocess; they now go
+    # through _ensure_scheduler_running like extract jobs, so they share
+    # the same model-grouped rotation (see scheduler.py).
+    dbpath = tmp_path / "t.sqlite"
+    calls = []
+    monkeypatch.setattr("storyindex.app._ensure_scheduler_running", lambda: calls.append(1))
+    monkeypatch.setattr("storyindex.app._spawn_job", lambda job_id: calls.append(("spawn", job_id)))
+
+    client = _client(dbpath)
+    r = client.post("/jobs/cluster", data={"model": "m"})
+    assert r.status_code == 302
+    assert calls == [1]
+
+    conn = db.connect(dbpath)
+    job = db.list_jobs(conn)[0]
+    assert job["type"] == "cluster"
+    assert job["model"] == "m"
+    conn.close()
+
+
+def test_create_cluster_job_defaults_model_when_blank(tmp_path, monkeypatch):
+    # A concrete default (not None) keeps the scheduler's group-by-model
+    # sort key stable across cluster jobs left at their default model.
+    from storyindex.cluster import DEFAULT_EMBED_MODEL
+
+    dbpath = tmp_path / "t.sqlite"
+    monkeypatch.setattr("storyindex.app._ensure_scheduler_running", lambda: None)
+
+    client = _client(dbpath)
+    r = client.post("/jobs/cluster", data={"model": ""})
+    assert r.status_code == 302
+
+    conn = db.connect(dbpath)
+    job = db.list_jobs(conn)[0]
+    assert job["model"] == DEFAULT_EMBED_MODEL
     conn.close()
 
 
@@ -339,8 +404,8 @@ def test_format_duration():
     assert _format_duration(90000) == "~1d 1h"
 
 
-def test_extract_job_etas_sole_job_ignores_sharing(tmp_path):
-    from storyindex.app import _extract_job_etas
+def test_scheduled_job_etas_sole_job_ignores_sharing(tmp_path):
+    from storyindex.app import _scheduled_job_etas
 
     conn = db.connect(tmp_path / "t.sqlite")
     job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
@@ -352,11 +417,11 @@ def test_extract_job_etas_sole_job_ignores_sharing(tmp_path):
     conn.close()
 
     # 90 remaining at 1 item/sec, nothing else in the rotation to share with.
-    assert _extract_job_etas([job]) == {job_id: 90.0}
+    assert _scheduled_job_etas([job]) == {job_id: 90.0}
 
 
-def test_extract_job_etas_none_without_timing_data(tmp_path):
-    from storyindex.app import _extract_job_etas
+def test_scheduled_job_etas_none_without_timing_data(tmp_path):
+    from storyindex.app import _scheduled_job_etas
 
     conn = db.connect(tmp_path / "t.sqlite")
     job_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
@@ -365,10 +430,10 @@ def test_extract_job_etas_none_without_timing_data(tmp_path):
     job = db.get_job(conn, job_id)
     conn.close()
 
-    assert _extract_job_etas([job]) == {job_id: None}
+    assert _scheduled_job_etas([job]) == {job_id: None}
 
 
-def test_extract_job_etas_smaller_job_finishes_first_and_bigger_one_then_speeds_up(tmp_path):
+def test_scheduled_job_etas_smaller_job_finishes_first_and_bigger_one_then_speeds_up(tmp_path):
     # Two jobs at the same 1 item/sec rate, sharing the scheduler equally:
     # the smaller job (10 remaining) finishes at 2x its own pace (20s,
     # matching the old flat-N guess exactly), but the bigger job (100
@@ -377,7 +442,7 @@ def test_extract_job_etas_smaller_job_finishes_first_and_bigger_one_then_speeds_
     # 20s it stops competing, so the big job gets the whole scheduler for
     # its last (100-10)=90s of own-work, landing at 20+90=110s, well under
     # the naive 200s a flat-N model would have shown.
-    from storyindex.app import _extract_job_etas
+    from storyindex.app import _scheduled_job_etas
 
     conn = db.connect(tmp_path / "t.sqlite")
     small_id = db.create_job(conn, "extract", "2026-01-01T00:00:00Z", scope="all")
@@ -391,7 +456,7 @@ def test_extract_job_etas_smaller_job_finishes_first_and_bigger_one_then_speeds_
     big = db.get_job(conn, big_id)
     conn.close()
 
-    etas = _extract_job_etas([small, big])
+    etas = _scheduled_job_etas([small, big])
     assert etas[small_id] == 20.0
     assert etas[big_id] == 110.0
     # The two numbers shouldn't be misread as "everything done in 110s either

@@ -4,8 +4,11 @@ from storyindex import db
 
 
 def test_reap_stale_jobs_marks_running_as_failed(conn):
+    # sync jobs are still each their own independent subprocess (unlike
+    # extract/cluster, which now share the scheduler's pid and are never
+    # reaped for a merely-dead pid - see reap_dead_pid_jobs).
     now = "2026-01-01T00:00:00Z"
-    job_id = db.create_job(conn, "cluster", now)
+    job_id = db.create_job(conn, "sync", now)
     db.mark_job_running(conn, job_id, now, pid=999999)
     conn.commit()
 
@@ -54,10 +57,13 @@ def test_reap_stale_jobs_leaves_a_still_alive_detached_job_running(conn):
 
 def test_reap_dead_pid_jobs_only_touches_dead_pids(conn):
     now = "2026-01-01T00:00:00Z"
-    alive_job = db.create_job(conn, "cluster", now)
+    # sync jobs are still each their own independent _spawn_job subprocess
+    # (unlike extract/cluster, which now share the scheduler's pid), so a
+    # dead pid here really does mean the job died.
+    alive_job = db.create_job(conn, "sync", now)
     db.mark_job_running(conn, alive_job, now, pid=os.getpid())  # our own pid: alive
 
-    dead_job = db.create_job(conn, "cluster", now)
+    dead_job = db.create_job(conn, "sync", now)
     # a pid essentially guaranteed not to exist
     db.mark_job_running(conn, dead_job, now, pid=2**30)
     conn.commit()
@@ -71,14 +77,30 @@ def test_reap_dead_pid_jobs_only_touches_dead_pids(conn):
 
 
 def test_reap_dead_pid_jobs_never_fails_extract_jobs(conn):
-    # Every running extract job's pid column holds the *shared* scheduler
-    # process's pid (see scheduler.py), not an independent per-job
-    # process - so a dead pid here means "the scheduler needs a respawn"
-    # (app._ensure_scheduler_if_extract_jobs_pending), not "this job
-    # crashed". Mass-failing every extract job sharing that pid would
-    # discard their resumability.
+    # Every running extract/cluster job's pid column holds the *shared*
+    # scheduler process's pid (see scheduler.py), not an independent
+    # per-job process - so a dead pid here means "the scheduler needs a
+    # respawn" (app._ensure_scheduler_if_jobs_pending), not "this job
+    # crashed". Mass-failing every extract/cluster job sharing that pid
+    # would discard their resumability.
     now = "2026-01-01T00:00:00Z"
     job_id = db.create_job(conn, "extract", now)
+    db.mark_job_running(conn, job_id, now, pid=2**30)  # essentially guaranteed dead
+    conn.commit()
+
+    reaped = db.reap_dead_pid_jobs(conn, now)
+    conn.commit()
+
+    assert reaped == []
+    assert db.get_job(conn, job_id)["status"] == "running"
+
+
+def test_reap_dead_pid_jobs_never_fails_cluster_jobs(conn):
+    # Same reasoning as the extract case above: cluster jobs now also
+    # share the scheduler's pid (see scheduler.py generalizing to drive
+    # both job types), so a dead scheduler pid must not mass-fail them.
+    now = "2026-01-01T00:00:00Z"
+    job_id = db.create_job(conn, "cluster", now)
     db.mark_job_running(conn, job_id, now, pid=2**30)  # essentially guaranteed dead
     conn.commit()
 
@@ -96,7 +118,7 @@ def test_reconnect_survives_a_stuck_running_job(tmp_path):
     path = tmp_path / "crash.sqlite"
     conn1 = db.connect(path)
     now = "2026-01-01T00:00:00Z"
-    job_id = db.create_job(conn1, "cluster", now)
+    job_id = db.create_job(conn1, "sync", now)
     db.mark_job_running(conn1, job_id, now, pid=999998)
     conn1.commit()
     conn1.close()  # simulate the process dying without a clean shutdown
@@ -107,7 +129,7 @@ def test_reconnect_survives_a_stuck_running_job(tmp_path):
     assert reaped == [job_id]
 
     # DB is still fully usable afterward
-    db.create_job(conn2, "cluster", now)
+    db.create_job(conn2, "sync", now)
     conn2.commit()
     assert len(db.list_jobs(conn2)) == 2
     conn2.close()

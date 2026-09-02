@@ -167,6 +167,33 @@ def run_extract_job(db_path: Path, job_id: int) -> None:
         conn.close()
 
 
+def write_cluster_results(
+    conn: sqlite3.Connection,
+    job_id: int,
+    clusters: list,
+    rows_by_text: dict[str, list],
+    counts: Counter,
+) -> None:
+    """Turn finished clusters into tags + story_tags links and mark their
+    source candidates clustered. Shared by run_cluster_job's own single-job
+    run and scheduler.py's cross-job block loop (see cluster_tag_texts'
+    module docstring for why clustering itself streams incrementally but
+    this write-out step only makes sense once every text has a cluster)."""
+    since_commit = 0
+    for cluster in clusters:
+        name = canonical_name(cluster.members, counts)
+        tag_id = db.get_or_create_tag(conn, name, _now())
+        for text in cluster.members:
+            for row in rows_by_text[text]:
+                db.link_story_tag(conn, row["story_id"], tag_id, source="model", job_id=job_id)
+                db.mark_candidate_clustered(conn, row["id"])
+            since_commit += 1
+            if since_commit >= COMMIT_EVERY:
+                conn.commit()
+                since_commit = 0
+    conn.commit()
+
+
 def run_cluster_job(db_path: Path, job_id: int) -> None:
     conn = db.connect(db_path)
     try:
@@ -211,22 +238,11 @@ def run_cluster_job(db_path: Path, job_id: int) -> None:
         conn.commit()
 
         # `done` already reached len(distinct_texts) during embedding above
-        # - this pass only writes clustering's results out, so it doesn't
-        # increment progress again (that would double-count past 100%).
-        since_commit = 0
-        for cluster in clusters:
-            name = canonical_name(cluster.members, counts)
-            tag_id = db.get_or_create_tag(conn, name, _now())
-            for text in cluster.members:
-                for row in rows_by_text[text]:
-                    db.link_story_tag(conn, row["story_id"], tag_id, source="model", job_id=job_id)
-                    db.mark_candidate_clustered(conn, row["id"])
-                since_commit += 1
-                if since_commit >= COMMIT_EVERY:
-                    conn.commit()
-                    since_commit = 0
+        # - write_cluster_results only writes clustering's results out, so
+        # it doesn't increment progress again (that would double-count past
+        # 100%).
+        write_cluster_results(conn, job_id, clusters, rows_by_text, counts)
 
-        conn.commit()
         db.mark_job_done(conn, job_id, _now())
         conn.commit()
     except Exception as exc:  # noqa: BLE001

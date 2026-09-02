@@ -46,6 +46,33 @@ class Cluster:
         self.centroid = _mean_vec(self.vectors)
 
 
+def assign_embedded(
+    clusters: list[Cluster],
+    text: str,
+    vec: list[float],
+    threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+) -> None:
+    """Greedy-assign one already-embedded text to its most similar existing
+    cluster (mutates `clusters` in place), or start a new one. Split out of
+    cluster_tag_texts so a caller driving its own embedding calls one text
+    at a time — e.g. scheduler.py, interleaving this job's calls with other
+    jobs' round by round — can reuse the same assignment logic instead of
+    needing every text embedded up front."""
+    best_cluster = None
+    best_sim = -1.0
+    for c in clusters:
+        sim = _cosine(vec, c.centroid)
+        if sim > best_sim:
+            best_sim = sim
+            best_cluster = c
+    if best_cluster is not None and best_sim >= threshold:
+        best_cluster.add(text, vec)
+    else:
+        c = Cluster()
+        c.add(text, vec)
+        clusters.append(c)
+
+
 def cluster_tag_texts(
     texts: list[str],
     model: str = DEFAULT_EMBED_MODEL,
@@ -69,19 +96,7 @@ def cluster_tag_texts(
         vec = embed(text, model=model, host=host)
         if on_embedded is not None:
             on_embedded(text)
-        best_cluster = None
-        best_sim = -1.0
-        for c in clusters:
-            sim = _cosine(vec, c.centroid)
-            if sim > best_sim:
-                best_sim = sim
-                best_cluster = c
-        if best_cluster is not None and best_sim >= threshold:
-            best_cluster.add(text, vec)
-        else:
-            c = Cluster()
-            c.add(text, vec)
-            clusters.append(c)
+        assign_embedded(clusters, text, vec, threshold)
     return clusters
 
 
